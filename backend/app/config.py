@@ -1,0 +1,20 @@
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    app_name: str = "LocalRAG Intelligent Retrieval Platform"
+    database_url: str = (
+        "postgresql://retrieval:local_development_only@localhost:5432/retrieval"
+    )
+    redis_url: str = "redis://localhost:6379/0"
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:3b"
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
