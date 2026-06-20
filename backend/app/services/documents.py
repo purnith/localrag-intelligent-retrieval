@@ -1,4 +1,5 @@
 from io import BytesIO
+from hashlib import sha256
 from pathlib import Path
 
 from docx import Document
@@ -32,3 +33,7 @@ def chunk_text(text: str, chunk_size: int = 180, overlap: int = 30) -> list[str]
         if start + chunk_size >= len(words):
             break
     return chunks
+
+
+def hash_chunks(chunks: list[str]) -> str:
+    return sha256("\n".join(chunks).encode("utf-8")).hexdigest()

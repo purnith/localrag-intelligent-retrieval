@@ -16,6 +16,10 @@ sent to an external AI provider, and no paid API key is required.
 - Retrieve passages by semantic similarity rather than exact keywords
 - Generate grounded answers with Qwen 2.5 through Ollama
 - Display retrieved source passages and similarity scores
+- Manage, select, and delete indexed documents
+- Prevent duplicate indexing with content hashes
+- Combine vector similarity with PostgreSQL full-text matching
+- Filter weak matches and duplicate retrieved passages
 - Check PostgreSQL, Redis, Ollama, and API availability concurrently
 - Run the complete system with Docker Compose
 
@@ -112,6 +116,7 @@ local project data intentionally, use `docker compose down --volumes`.
 | `POST` | `/api/documents` | Upload, extract, embed, and index a document |
 | `POST` | `/api/documents/batch` | Upload and index multiple documents atomically |
 | `GET` | `/api/documents` | List indexed documents |
+| `DELETE` | `/api/documents/{id}` | Delete a document and its chunks |
 | `POST` | `/api/search` | Retrieve semantically similar chunks |
 | `POST` | `/api/ask` | Retrieve evidence and generate a grounded answer |
 
@@ -154,7 +159,7 @@ is not yet a production or fully distributed multi-agent system.
 
 - Background ingestion workers and job status tracking
 - Redis query caching and conversation sessions
-- Hybrid keyword and vector retrieval
+- Configurable retrieval thresholds and local reranking
 - Reranking and retrieval-quality evaluation
 - Authentication and document-level authorization
 - Specialized routing, retrieval, synthesis, and evaluation agents

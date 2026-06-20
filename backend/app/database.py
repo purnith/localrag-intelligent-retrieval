@@ -17,8 +17,19 @@ async def initialize_database() -> None:
                 id BIGSERIAL PRIMARY KEY,
                 filename TEXT NOT NULL,
                 content_type TEXT NOT NULL,
+                content_hash TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
+            """
+        )
+        await connection.execute(
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT"
+        )
+        await connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS documents_content_hash_idx
+            ON documents(content_hash)
+            WHERE content_hash IS NOT NULL
             """
         )
         await connection.execute(
@@ -31,6 +42,13 @@ async def initialize_database() -> None:
                 embedding vector(768) NOT NULL,
                 UNIQUE(document_id, chunk_index)
             )
+            """
+        )
+        await connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS document_chunks_content_fts_idx
+            ON document_chunks
+            USING GIN(to_tsvector('english', content))
             """
         )
 

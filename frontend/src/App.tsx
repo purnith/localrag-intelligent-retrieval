@@ -19,8 +19,18 @@ type Answer = {
 };
 
 type BatchUploadResponse = {
-  total_documents: number;
+  total_files: number;
+  indexed_documents: number;
+  duplicate_documents: number;
   total_chunks: number;
+};
+
+type DocumentRecord = {
+  id: number;
+  filename: string;
+  content_type: string;
+  created_at: string;
+  chunks: number;
 };
 
 const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -28,6 +38,8 @@ const maxBatchFiles = 10;
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [uploadMessage, setUploadMessage] = useState("");
   const [question, setQuestion] = useState("");
@@ -40,7 +52,22 @@ export default function App() {
       .then((response) => response.json())
       .then(setHealth)
       .catch(() => setHealth(null));
+    loadDocuments();
   }, []);
+
+  async function loadDocuments() {
+    try {
+      const response = await fetch(`${apiUrl}/api/documents`);
+      if (!response.ok) return;
+      const data: DocumentRecord[] = await response.json();
+      setDocuments(data);
+      setSelectedDocumentIds((current) =>
+        current.filter((id) => data.some((document) => document.id === id)),
+      );
+    } catch {
+      // The health indicator already communicates that the API is unavailable.
+    }
+  }
 
   function selectFiles(selected: FileList | null) {
     const nextFiles = Array.from(selected ?? []);
@@ -70,14 +97,42 @@ export default function App() {
       const data: BatchUploadResponse & { detail?: string } = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Upload failed");
       setUploadMessage(
-        `${data.total_documents} document(s) indexed into ${data.total_chunks} chunk(s).`,
+        data.duplicate_documents
+          ? `${data.indexed_documents} new document(s) indexed; ${data.duplicate_documents} duplicate(s) skipped.`
+          : `${data.indexed_documents} document(s) indexed into ${data.total_chunks} chunk(s).`,
       );
       setFiles([]);
+      await loadDocuments();
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function deleteDocument(document: DocumentRecord) {
+    if (!window.confirm(`Delete ${document.filename} from the knowledge base?`)) return;
+    setError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/documents/${document.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail ?? "Delete failed");
+      }
+      await loadDocuments();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Delete failed");
+    }
+  }
+
+  function toggleDocument(documentId: number) {
+    setSelectedDocumentIds((current) =>
+      current.includes(documentId)
+        ? current.filter((id) => id !== documentId)
+        : [...current, documentId],
+    );
   }
 
   async function askQuestion(event: FormEvent) {
@@ -90,7 +145,11 @@ export default function App() {
       const response = await fetch(`${apiUrl}/api/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: question, limit: 5 }),
+        body: JSON.stringify({
+          query: question,
+          limit: 5,
+          document_ids: selectedDocumentIds.length ? selectedDocumentIds : null,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Question failed");
@@ -143,6 +202,43 @@ export default function App() {
             </button>
           </form>
           {uploadMessage && <p className="success">{uploadMessage}</p>}
+          <div className="document-library">
+            <div className="library-heading">
+              <h3>Document library</h3>
+              <span>{documents.length}</span>
+            </div>
+            <p className="library-hint">
+              {selectedDocumentIds.length
+                ? `Searching ${selectedDocumentIds.length} selected document(s)`
+                : "No selection means search all documents"}
+            </p>
+            <div className="document-list">
+              {documents.map((document) => (
+                <div className="document-row" key={document.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedDocumentIds.includes(document.id)}
+                      onChange={() => toggleDocument(document.id)}
+                    />
+                    <span>
+                      <strong>{document.filename}</strong>
+                      <small>{document.chunks} chunk(s)</small>
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    className="delete-button"
+                    onClick={() => deleteDocument(document)}
+                    aria-label={`Delete ${document.filename}`}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+              {!documents.length && <p className="empty-library">No documents indexed yet.</p>}
+            </div>
+          </div>
         </article>
 
         <article className="panel question-panel">

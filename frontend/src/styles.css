@@ -50,6 +50,19 @@ button:hover:not(:disabled) { background: #75e7c8; }
 button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .success { color: #75e7c8 !important; }
+.document-library { margin-top: 28px; padding-top: 20px; border-top: 1px solid #203a57; }
+.library-heading { display: flex; align-items: center; justify-content: space-between; }
+.library-heading h3 { margin: 0; font-size: 0.95rem; }
+.library-heading span { min-width: 24px; padding: 3px 7px; color: #07111f; background: #56dbb7; border-radius: 999px; font-size: 0.72rem; font-weight: 800; text-align: center; }
+.library-hint, .empty-library { color: #8191a7; font-size: 0.78rem; }
+.document-list { display: grid; gap: 7px; max-height: 260px; overflow: auto; }
+.document-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px; background: #091728; border: 1px solid #1d354f; border-radius: 9px; }
+.document-row label { display: flex; min-width: 0; align-items: center; gap: 9px; cursor: pointer; }
+.document-row label span { display: grid; min-width: 0; }
+.document-row strong { overflow: hidden; font-size: 0.8rem; text-overflow: ellipsis; white-space: nowrap; }
+.document-row small { color: #71839b; font-size: 0.7rem; }
+.delete-button { padding: 6px 8px; color: #f2a08d; background: transparent; border: 1px solid #603a3c; font-size: 0.7rem; }
+.delete-button:hover:not(:disabled) { color: #07111f; background: #f2a08d; }
 .notice { margin-top: 18px; }
 .error { color: #f2a08d; border-color: #7a403b; }
 .answer-card { margin-top: 20px; }

@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from app.database import get_pool
-from app.services.documents import chunk_text, extract_text
+from app.services.documents import chunk_text, extract_text, hash_chunks
 from app.services.ollama import create_embeddings
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -17,6 +17,7 @@ SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt"}
 class PreparedDocument:
     filename: str
     content_type: str
+    content_hash: str
     chunks: list[str]
     embeddings: list[list[float]]
 
@@ -49,6 +50,7 @@ async def prepare_document(file: UploadFile) -> PreparedDocument:
     return PreparedDocument(
         filename=filename,
         content_type=file.content_type or "application/octet-stream",
+        content_hash=hash_chunks(chunks),
         chunks=chunks,
         embeddings=embeddings,
     )
@@ -61,14 +63,36 @@ async def store_documents(
     database = get_pool()
     async with database.acquire() as connection, connection.transaction():
         for document in documents:
+            existing = await connection.fetchrow(
+                """
+                SELECT d.id, COUNT(c.id)::int AS chunks
+                FROM documents d
+                LEFT JOIN document_chunks c ON c.document_id = d.id
+                WHERE d.content_hash = $1
+                GROUP BY d.id
+                """,
+                document.content_hash,
+            )
+            if existing is not None:
+                stored.append(
+                    {
+                        "id": existing["id"],
+                        "filename": document.filename,
+                        "chunks": existing["chunks"],
+                        "duplicate": True,
+                    }
+                )
+                continue
+
             document_id = await connection.fetchval(
                 """
-                INSERT INTO documents(filename, content_type)
-                VALUES($1, $2)
+                INSERT INTO documents(filename, content_type, content_hash)
+                VALUES($1, $2, $3)
                 RETURNING id
                 """,
                 document.filename,
                 document.content_type,
+                document.content_hash,
             )
             await connection.executemany(
                 """
@@ -87,6 +111,7 @@ async def store_documents(
                     "id": document_id,
                     "filename": document.filename,
                     "chunks": len(document.chunks),
+                    "duplicate": False,
                 }
             )
     return stored
@@ -111,8 +136,14 @@ async def upload_document_batch(
     stored = await store_documents(prepared)
     return {
         "documents": stored,
-        "total_documents": len(stored),
-        "total_chunks": sum(int(document["chunks"]) for document in stored),
+        "total_files": len(stored),
+        "indexed_documents": sum(not bool(document["duplicate"]) for document in stored),
+        "duplicate_documents": sum(bool(document["duplicate"]) for document in stored),
+        "total_chunks": sum(
+            int(document["chunks"])
+            for document in stored
+            if not bool(document["duplicate"])
+        ),
     }
 
 
@@ -129,3 +160,10 @@ async def list_documents() -> list[dict[str, object]]:
         """
     )
     return [dict(row) for row in rows]
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(document_id: int) -> None:
+    result = await get_pool().execute("DELETE FROM documents WHERE id = $1", document_id)
+    if result == "DELETE 0":
+        raise HTTPException(404, "Document not found")

@@ -1,4 +1,4 @@
-from app.services.documents import chunk_text, extract_text
+from app.services.documents import chunk_text, extract_text, hash_chunks
 
 
 def test_extracts_utf8_text_file() -> None:
@@ -24,3 +24,8 @@ def test_chunk_text_preserves_overlap() -> None:
 
 def test_chunk_text_handles_empty_content() -> None:
     assert chunk_text("   ") == []
+
+
+def test_hash_chunks_is_stable_and_content_sensitive() -> None:
+    assert hash_chunks(["same content"]) == hash_chunks(["same content"])
+    assert hash_chunks(["same content"]) != hash_chunks(["different content"])

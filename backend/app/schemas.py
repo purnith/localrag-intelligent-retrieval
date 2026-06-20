@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 class QueryRequest(BaseModel):
     query: str = Field(min_length=2, max_length=2000)
     limit: int = Field(default=5, ge=1, le=10)
+    document_ids: list[int] | None = Field(default=None, max_length=50)
 
 
 class SearchResult(BaseModel):
