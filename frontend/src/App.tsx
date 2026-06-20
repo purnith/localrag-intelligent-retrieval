@@ -164,7 +164,7 @@ export default function App() {
   return (
     <main>
       <section className="hero">
-        <p className="eyebrow">LOCAL / OPEN SOURCE / INTELLIGENT</p>
+        <p className="eyebrow">INGEST / RETRIEVE / ANSWER</p>
         <h1>Ask your documents.</h1>
         <p className="subtitle">
           Upload multiple documents, ask a question, and inspect the evidence behind the answer.

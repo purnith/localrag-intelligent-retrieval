@@ -1,17 +1,18 @@
 # LocalRAG — Intelligent Document Retrieval Platform
 
-LocalRAG is a local-first retrieval-augmented generation (RAG) application.
-Users upload documents, ask questions in natural language, and receive answers
-grounded in semantically retrieved document passages.
+LocalRAG is a containerized retrieval-augmented generation (RAG) platform for
+multi-document knowledge retrieval. It ingests, chunks, and embeds documents,
+combines semantic vector search with PostgreSQL full-text search, and generates
+answers grounded in retrieved source passages.
 
-The complete stack runs locally with open-source software. Documents are not
-sent to an external AI provider, and no paid API key is required.
+The system uses a service-oriented architecture built with React, FastAPI,
+PostgreSQL/pgvector, Redis, Ollama, and Docker Compose.
 
 ## Features
 
 - Upload and index batches of up to 10 PDF, DOCX, and TXT documents, 10 MB each
 - Extract and split document text into overlapping chunks
-- Generate embeddings locally with `nomic-embed-text`
+- Generate semantic embeddings with `nomic-embed-text`
 - Store and search vectors with PostgreSQL and pgvector
 - Retrieve passages by semantic similarity rather than exact keywords
 - Generate grounded answers with Qwen 2.5 through Ollama
@@ -66,7 +67,7 @@ Question
 | API | FastAPI, Pydantic | Validation, orchestration, and REST endpoints |
 | Database | PostgreSQL, pgvector | Document metadata, chunks, and vector search |
 | Cache | Redis | Foundation for caching and session state |
-| AI runtime | Ollama | Local model serving |
+| AI runtime | Ollama | Model serving and inference |
 | Generation model | Qwen 2.5 3B | Grounded natural-language answers |
 | Embedding model | nomic-embed-text | 768-dimensional semantic embeddings |
 | Infrastructure | Docker Compose | Reproducible local services and networking |
@@ -77,7 +78,7 @@ Question
 
 - Docker Desktop with WSL 2 on Windows
 - At least 8 GB of RAM; 16 GB is recommended
-- Approximately 5 GB of free disk space for images and models
+- Approximately 5 GB of available disk space for images and models
 
 ### Start the services
 
@@ -86,7 +87,7 @@ Copy-Item .env.example .env
 docker compose up --build -d
 ```
 
-Download the local models once:
+Download the models once:
 
 ```powershell
 docker compose exec ollama ollama pull qwen2.5:3b
@@ -145,15 +146,17 @@ that references the source document.
 
 ## Current scope and limitations
 
-This repository is a functional local RAG application and learning project. It
-is not yet a production or fully distributed multi-agent system.
+The current implementation focuses on a single-node, containerized RAG
+deployment. The architecture is structured for incremental extraction of
+workers, retrieval services, and agent workflows as operational requirements
+grow.
 
 - Document ingestion currently runs inside the API request.
 - Redis is connected and monitored but caching is not implemented yet.
 - Authentication and per-user document authorization are not implemented.
 - Scanned PDFs require OCR, which is not currently included.
 - Vector search currently uses exact cosine distance without an approximate index.
-- Local model quality and latency depend on available hardware.
+- Model quality and inference latency depend on available hardware.
 
 ## Roadmap
 
@@ -165,11 +168,11 @@ is not yet a production or fully distributed multi-agent system.
 - Specialized routing, retrieval, synthesis, and evaluation agents
 - Load testing, observability, retries, and horizontal scaling
 
-## Privacy and cost
+## Deployment and data boundary
 
-The default configuration sends no documents to paid AI APIs. Ollama serves
-both models locally. Docker image and model downloads require internet access,
-but running the application does not incur API usage charges.
+Ollama hosts generation and embedding models within the deployment boundary.
+Document extraction, vectorization, retrieval, and answer generation are
+performed by the application services defined in Docker Compose.
 
 ## License
 

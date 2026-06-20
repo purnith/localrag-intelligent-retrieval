@@ -20,7 +20,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    description="A local-first retrieval-augmented generation platform for document search and grounded answers.",
+    description="A retrieval-augmented generation platform for multi-document search and source-grounded answers.",
     version="0.2.0",
     lifespan=lifespan,
 )
