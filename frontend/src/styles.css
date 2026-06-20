@@ -41,6 +41,8 @@ form { display: grid; gap: 12px; margin-top: 24px; }
 .file-input { display: block; padding: 18px; border: 1px dashed #48627f; border-radius: 12px; color: #b8c5d5; cursor: pointer; text-align: center; }
 .file-input:hover { border-color: #56dbb7; }
 .file-input input { display: none; }
+.selected-files { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.selected-files li { overflow: hidden; padding: 7px 10px; color: #9fb0c5; background: #091728; border-radius: 7px; font-size: 0.82rem; text-overflow: ellipsis; white-space: nowrap; }
 textarea { width: 100%; resize: vertical; padding: 15px; color: #eef3f8; background: #091728; border: 1px solid #294563; border-radius: 11px; outline: none; }
 textarea:focus { border-color: #56dbb7; box-shadow: 0 0 0 3px rgba(86, 219, 183, 0.1); }
 button { padding: 13px 18px; color: #07111f; background: #56dbb7; border: 0; border-radius: 10px; font-weight: 800; cursor: pointer; }

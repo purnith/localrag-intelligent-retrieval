@@ -18,11 +18,17 @@ type Answer = {
   sources: Source[];
 };
 
+type BatchUploadResponse = {
+  total_documents: number;
+  total_chunks: number;
+};
+
 const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const maxBatchFiles = 10;
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploadMessage, setUploadMessage] = useState("");
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<Answer | null>(null);
@@ -36,22 +42,37 @@ export default function App() {
       .catch(() => setHealth(null));
   }, []);
 
-  async function uploadDocument(event: FormEvent) {
+  function selectFiles(selected: FileList | null) {
+    const nextFiles = Array.from(selected ?? []);
+    setUploadMessage("");
+    if (nextFiles.length > maxBatchFiles) {
+      setFiles([]);
+      setError(`Select no more than ${maxBatchFiles} documents at once.`);
+      return;
+    }
+    setError("");
+    setFiles(nextFiles);
+  }
+
+  async function uploadDocuments(event: FormEvent) {
     event.preventDefault();
-    if (!file) return;
+    if (!files.length) return;
     setBusy(true);
     setError("");
     setUploadMessage("");
     const body = new FormData();
-    body.append("file", file);
+    files.forEach((file) => body.append("files", file));
     try {
-      const response = await fetch(`${apiUrl}/api/documents`, {
+      const response = await fetch(`${apiUrl}/api/documents/batch`, {
         method: "POST",
         body,
       });
-      const data = await response.json();
+      const data: BatchUploadResponse & { detail?: string } = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Upload failed");
-      setUploadMessage(`${data.filename} indexed into ${data.chunks} chunk(s).`);
+      setUploadMessage(
+        `${data.total_documents} document(s) indexed into ${data.total_chunks} chunk(s).`,
+      );
+      setFiles([]);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
     } finally {
@@ -84,10 +105,10 @@ export default function App() {
   return (
     <main>
       <section className="hero">
-        <p className="eyebrow">LOCAL · OPEN SOURCE · INTELLIGENT</p>
+        <p className="eyebrow">LOCAL / OPEN SOURCE / INTELLIGENT</p>
         <h1>Ask your documents.</h1>
         <p className="subtitle">
-          Upload a document, ask a question, and inspect the evidence behind the answer.
+          Upload multiple documents, ask a question, and inspect the evidence behind the answer.
         </p>
       </section>
 
@@ -95,17 +116,31 @@ export default function App() {
         <article className="panel">
           <span className="step">01</span>
           <h2>Add knowledge</h2>
-          <p>PDF, DOCX, or TXT · maximum 10 MB</p>
-          <form onSubmit={uploadDocument}>
+          <p>Up to 10 PDF, DOCX, or TXT files / maximum 10 MB each</p>
+          <form onSubmit={uploadDocuments}>
             <label className="file-input">
               <input
                 type="file"
                 accept=".pdf,.docx,.txt"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                multiple
+                onChange={(event) => selectFiles(event.target.files)}
               />
-              <span>{file?.name ?? "Choose a document"}</span>
+              <span>
+                {files.length
+                  ? `${files.length} document(s) selected`
+                  : "Choose one or more documents"}
+              </span>
             </label>
-            <button disabled={!file || busy}>{busy ? "Working…" : "Upload and index"}</button>
+            {files.length > 0 && (
+              <ul className="selected-files">
+                {files.map((file) => (
+                  <li key={`${file.name}-${file.lastModified}`}>{file.name}</li>
+                ))}
+              </ul>
+            )}
+            <button disabled={!files.length || busy}>
+              {busy ? "Working..." : "Upload and index"}
+            </button>
           </form>
           {uploadMessage && <p className="success">{uploadMessage}</p>}
         </article>
@@ -117,10 +152,12 @@ export default function App() {
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder="What does the document say about…?"
+              placeholder="What do the documents say about...?"
               rows={4}
             />
-            <button disabled={!question.trim() || busy}>{busy ? "Thinking…" : "Find an answer"}</button>
+            <button disabled={!question.trim() || busy}>
+              {busy ? "Thinking..." : "Find an answer"}
+            </button>
           </form>
         </article>
       </section>
@@ -136,7 +173,7 @@ export default function App() {
             {result.sources.map((source, index) => (
               <details key={source.chunk_id}>
                 <summary>
-                  Source {index + 1} · {source.filename}
+                  Source {index + 1} / {source.filename}
                   <span>{Math.round(source.score * 100)}% match</span>
                 </summary>
                 <p>{source.content}</p>

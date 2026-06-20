@@ -9,7 +9,7 @@ sent to an external AI provider, and no paid API key is required.
 
 ## Features
 
-- Upload and index PDF, DOCX, and TXT documents up to 10 MB
+- Upload and index batches of up to 10 PDF, DOCX, and TXT documents, 10 MB each
 - Extract and split document text into overlapping chunks
 - Generate embeddings locally with `nomic-embed-text`
 - Store and search vectors with PostgreSQL and pgvector
@@ -110,6 +110,7 @@ local project data intentionally, use `docker compose down --volumes`.
 | --- | --- | --- |
 | `GET` | `/api/health` | Report component availability |
 | `POST` | `/api/documents` | Upload, extract, embed, and index a document |
+| `POST` | `/api/documents/batch` | Upload and index multiple documents atomically |
 | `GET` | `/api/documents` | List indexed documents |
 | `POST` | `/api/search` | Retrieve semantically similar chunks |
 | `POST` | `/api/ask` | Retrieve evidence and generate a grounded answer |
