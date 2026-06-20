@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-loader
+  namespace: localrag
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: model-loader
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: model-loader
+          image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: OLLAMA_HOST
+              value: http://ollama:11434
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until ollama list >/dev/null 2>&1; do sleep 3; done
+              ollama pull nomic-embed-text
+              ollama pull qwen2.5:3b
+

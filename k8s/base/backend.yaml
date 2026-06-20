@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: localrag
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: [sh, -c, until pg_isready -h postgres -U retrieval; do sleep 2; done]
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command: [sh, -c, until redis-cli -h redis ping; do sleep 2; done]
+      containers:
+        - name: backend
+          image: localrag-backend:dev
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef:
+                name: localrag-config
+            - secretRef:
+                name: localrag-secrets
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: localrag
+spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+

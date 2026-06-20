@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: localrag-config
+  namespace: localrag
+data:
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  OLLAMA_URL: http://ollama:11434
+  OLLAMA_MODEL: qwen2.5:3b
+  UPLOAD_DIR: /data/uploads
+  VITE_API_URL: http://localhost:8000
+

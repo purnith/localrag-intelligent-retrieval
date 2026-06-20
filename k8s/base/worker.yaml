@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: localrag
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: [sh, -c, until pg_isready -h postgres -U retrieval; do sleep 2; done]
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command: [sh, -c, until redis-cli -h redis ping; do sleep 2; done]
+      securityContext:
+        fsGroup: 65534
+      containers:
+        - name: worker
+          image: localrag-backend:dev
+          imagePullPolicy: Never
+          command: [celery]
+          args: [-A, app.worker.celery_app, worker, --loglevel=info, --concurrency=2]
+          envFrom:
+            - configMapRef:
+                name: localrag-config
+            - secretRef:
+                name: localrag-secrets
+          env:
+            - name: HOME
+              value: /tmp
+            - name: PGSSLMODE
+              value: disable
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: uploads-data
+

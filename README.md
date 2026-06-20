@@ -6,7 +6,7 @@ combines semantic vector search with PostgreSQL full-text search, and generates
 answers grounded in retrieved source passages.
 
 The system uses a service-oriented architecture built with React, FastAPI,
-PostgreSQL/pgvector, Redis, Ollama, and Docker Compose.
+PostgreSQL/pgvector, Redis, Ollama, Docker Compose, and Kubernetes.
 
 ## Features
 
@@ -26,6 +26,8 @@ PostgreSQL/pgvector, Redis, Ollama, and Docker Compose.
 - Retry transient ingestion failures with exponential backoff
 - Check PostgreSQL, Redis, Ollama, and API availability concurrently
 - Run the complete system with Docker Compose
+- Deploy the platform to a local Kubernetes cluster with persistent storage,
+  resource limits, health probes, and independently managed workloads
 
 ## Architecture
 
@@ -76,7 +78,7 @@ Question
 | AI runtime | Ollama | Model serving and inference |
 | Generation model | Qwen 2.5 3B | Grounded natural-language answers |
 | Embedding model | nomic-embed-text | 768-dimensional semantic embeddings |
-| Infrastructure | Docker Compose | Reproducible local services and networking |
+| Infrastructure | Docker Compose, Kubernetes, kind | Container orchestration, service discovery, storage, and workload management |
 
 ## Quick start
 
@@ -114,6 +116,47 @@ docker compose down
 
 Docker volumes retain model and database data between restarts. To delete all
 local project data intentionally, use `docker compose down --volumes`.
+
+## Kubernetes deployment
+
+The Kubernetes configuration runs each platform component as an independently
+managed workload in the `localrag` namespace. PostgreSQL runs as a StatefulSet;
+the API, worker, frontend, Redis, and Ollama run as Deployments. Persistent
+volume claims retain database, queue, model, and staged-upload data.
+
+### Requirements
+
+- Docker Desktop
+- `kubectl`
+- `kind`
+- At least 12 GB of memory available to Docker Desktop; 16 GB is recommended
+
+Deploy the platform from PowerShell:
+
+```powershell
+.\scripts\deploy-kubernetes.ps1
+```
+
+The first deployment downloads the generation and embedding models and can take
+several minutes. Once the workloads are ready, expose the web and API services:
+
+```powershell
+.\scripts\port-forward-kubernetes.ps1
+```
+
+Inspect the deployment:
+
+```powershell
+kubectl get all,pvc -n localrag
+kubectl logs deployment/backend -n localrag
+kubectl logs deployment/worker -n localrag
+```
+
+Delete the local cluster when it is no longer needed:
+
+```powershell
+.\scripts\delete-kubernetes.ps1
+```
 
 ## API overview
 
@@ -154,7 +197,7 @@ that references the source document.
 
 ## Current scope and limitations
 
-The current implementation focuses on a single-node, containerized RAG
+The current implementation supports Docker Compose and a single-node Kubernetes
 deployment. The architecture is structured for incremental extraction of
 workers, retrieval services, and agent workflows as operational requirements
 grow.
