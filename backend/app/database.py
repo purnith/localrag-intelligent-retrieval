@@ -51,6 +51,36 @@ async def initialize_database() -> None:
             USING GIN(to_tsvector('english', content))
             """
         )
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ingestion_jobs (
+                id BIGSERIAL PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'queued',
+                total_files INTEGER NOT NULL,
+                processed_files INTEGER NOT NULL DEFAULT 0,
+                duplicate_files INTEGER NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ingestion_job_files (
+                id BIGSERIAL PRIMARY KEY,
+                job_id BIGINT NOT NULL REFERENCES ingestion_jobs(id) ON DELETE CASCADE,
+                filename TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                storage_path TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                document_id BIGINT REFERENCES documents(id) ON DELETE SET NULL,
+                duplicate BOOLEAN NOT NULL DEFAULT FALSE,
+                error TEXT
+            )
+            """
+        )
 
 
 async def close_database() -> None:

@@ -21,6 +21,9 @@ PostgreSQL/pgvector, Redis, Ollama, and Docker Compose.
 - Prevent duplicate indexing with content hashes
 - Combine vector similarity with PostgreSQL full-text matching
 - Filter weak matches and duplicate retrieved passages
+- Process document ingestion through a Redis-backed Celery worker
+- Track queued, processing, retrying, completed, and failed jobs
+- Retry transient ingestion failures with exponential backoff
 - Check PostgreSQL, Redis, Ollama, and API availability concurrently
 - Run the complete system with Docker Compose
 
@@ -31,17 +34,19 @@ React + TypeScript
         |
         | REST/JSON
         v
-FastAPI application
-   |         |          |
-   v         v          v
-PostgreSQL  Redis      Ollama
-+ pgvector  cache      Qwen + embedding model
+FastAPI application ---> Redis broker ---> Celery workers
+   |                                          |
+   v                                          v
+PostgreSQL + pgvector <-------------------- Ollama
 ```
 
 ### Ingestion workflow
 
 ```text
 Document upload
+  -> persistent job record
+  -> Redis task queue
+  -> Celery worker
   -> text extraction
   -> overlapping chunks
   -> local embeddings
@@ -67,6 +72,7 @@ Question
 | API | FastAPI, Pydantic | Validation, orchestration, and REST endpoints |
 | Database | PostgreSQL, pgvector | Document metadata, chunks, and vector search |
 | Cache | Redis | Foundation for caching and session state |
+| Worker | Celery | Background ingestion, progress, and retry handling |
 | AI runtime | Ollama | Model serving and inference |
 | Generation model | Qwen 2.5 3B | Grounded natural-language answers |
 | Embedding model | nomic-embed-text | 768-dimensional semantic embeddings |
@@ -116,6 +122,8 @@ local project data intentionally, use `docker compose down --volumes`.
 | `GET` | `/api/health` | Report component availability |
 | `POST` | `/api/documents` | Upload, extract, embed, and index a document |
 | `POST` | `/api/documents/batch` | Upload and index multiple documents atomically |
+| `POST` | `/api/documents/jobs` | Queue an asynchronous document-ingestion job |
+| `GET` | `/api/documents/jobs/{id}` | Read ingestion progress and file-level status |
 | `GET` | `/api/documents` | List indexed documents |
 | `DELETE` | `/api/documents/{id}` | Delete a document and its chunks |
 | `POST` | `/api/search` | Retrieve semantically similar chunks |
@@ -151,7 +159,6 @@ deployment. The architecture is structured for incremental extraction of
 workers, retrieval services, and agent workflows as operational requirements
 grow.
 
-- Document ingestion currently runs inside the API request.
 - Redis is connected and monitored but caching is not implemented yet.
 - Authentication and per-user document authorization are not implemented.
 - Scanned PDFs require OCR, which is not currently included.
@@ -160,7 +167,6 @@ grow.
 
 ## Roadmap
 
-- Background ingestion workers and job status tracking
 - Redis query caching and conversation sessions
 - Configurable retrieval thresholds and local reranking
 - Reranking and retrieval-quality evaluation

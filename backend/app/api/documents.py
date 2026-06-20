@@ -1,28 +1,22 @@
-from dataclasses import dataclass
 from pathlib import Path
+from shutil import rmtree
+from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from app.config import get_settings
 from app.database import get_pool
-from app.services.documents import chunk_text, extract_text, hash_chunks
-from app.services.ollama import create_embeddings
+from app.services.indexing import prepare_document_bytes, store_documents
+from app.worker import process_ingestion_job
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+settings = get_settings()
 MAX_FILE_SIZE = 10 * 1024 * 1024
 MAX_BATCH_FILES = 10
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt"}
 
 
-@dataclass
-class PreparedDocument:
-    filename: str
-    content_type: str
-    content_hash: str
-    chunks: list[str]
-    embeddings: list[list[float]]
-
-
-async def prepare_document(file: UploadFile) -> PreparedDocument:
+async def read_upload(file: UploadFile) -> tuple[str, str, bytes]:
     filename = Path(file.filename or "document").name
     if Path(filename).suffix.lower() not in SUPPORTED_SUFFIXES:
         raise HTTPException(
@@ -32,94 +26,29 @@ async def prepare_document(file: UploadFile) -> PreparedDocument:
     data = await file.read(MAX_FILE_SIZE + 1)
     if len(data) > MAX_FILE_SIZE:
         raise HTTPException(413, f"{filename}: file must be 10 MB or smaller")
+    return filename, file.content_type or "application/octet-stream", data
 
+
+def validate_batch(files: list[UploadFile]) -> None:
+    if not files:
+        raise HTTPException(400, "Select at least one document")
+    if len(files) > MAX_BATCH_FILES:
+        raise HTTPException(400, f"Upload no more than {MAX_BATCH_FILES} documents at once")
+
+
+async def prepare_upload(file: UploadFile):
+    filename, content_type, data = await read_upload(file)
     try:
-        text = extract_text(filename, data)
+        return await prepare_document_bytes(filename, content_type, data)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
     except Exception as error:
-        raise HTTPException(400, f"{filename}: could not read document: {error}") from error
-
-    chunks = chunk_text(text)
-    if not chunks:
-        raise HTTPException(400, f"{filename}: document contains no readable text")
-
-    try:
-        embeddings = await create_embeddings(chunks)
-    except Exception as error:
-        raise HTTPException(503, "The local embedding model is unavailable") from error
-
-    return PreparedDocument(
-        filename=filename,
-        content_type=file.content_type or "application/octet-stream",
-        content_hash=hash_chunks(chunks),
-        chunks=chunks,
-        embeddings=embeddings,
-    )
-
-
-async def store_documents(
-    documents: list[PreparedDocument],
-) -> list[dict[str, object]]:
-    stored: list[dict[str, object]] = []
-    database = get_pool()
-    async with database.acquire() as connection, connection.transaction():
-        for document in documents:
-            existing = await connection.fetchrow(
-                """
-                SELECT d.id, COUNT(c.id)::int AS chunks
-                FROM documents d
-                LEFT JOIN document_chunks c ON c.document_id = d.id
-                WHERE d.content_hash = $1
-                GROUP BY d.id
-                """,
-                document.content_hash,
-            )
-            if existing is not None:
-                stored.append(
-                    {
-                        "id": existing["id"],
-                        "filename": document.filename,
-                        "chunks": existing["chunks"],
-                        "duplicate": True,
-                    }
-                )
-                continue
-
-            document_id = await connection.fetchval(
-                """
-                INSERT INTO documents(filename, content_type, content_hash)
-                VALUES($1, $2, $3)
-                RETURNING id
-                """,
-                document.filename,
-                document.content_type,
-                document.content_hash,
-            )
-            await connection.executemany(
-                """
-                INSERT INTO document_chunks(document_id, chunk_index, content, embedding)
-                VALUES($1, $2, $3, $4::vector)
-                """,
-                [
-                    (document_id, index, chunk, str(embedding))
-                    for index, (chunk, embedding) in enumerate(
-                        zip(document.chunks, document.embeddings)
-                    )
-                ],
-            )
-            stored.append(
-                {
-                    "id": document_id,
-                    "filename": document.filename,
-                    "chunks": len(document.chunks),
-                    "duplicate": False,
-                }
-            )
-    return stored
+        raise HTTPException(503, "Document indexing service is unavailable") from error
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def upload_document(file: UploadFile = File(...)) -> dict[str, object]:
-    stored = await store_documents([await prepare_document(file)])
+    stored = await store_documents([await prepare_upload(file)])
     return stored[0]
 
 
@@ -127,24 +56,89 @@ async def upload_document(file: UploadFile = File(...)) -> dict[str, object]:
 async def upload_document_batch(
     files: list[UploadFile] = File(...),
 ) -> dict[str, object]:
-    if not files:
-        raise HTTPException(400, "Select at least one document")
-    if len(files) > MAX_BATCH_FILES:
-        raise HTTPException(400, f"Upload no more than {MAX_BATCH_FILES} documents at once")
+    validate_batch(files)
+    stored = await store_documents([await prepare_upload(file) for file in files])
+    return summarize_upload(stored)
 
-    prepared = [await prepare_document(file) for file in files]
-    stored = await store_documents(prepared)
-    return {
-        "documents": stored,
-        "total_files": len(stored),
-        "indexed_documents": sum(not bool(document["duplicate"]) for document in stored),
-        "duplicate_documents": sum(bool(document["duplicate"]) for document in stored),
-        "total_chunks": sum(
-            int(document["chunks"])
-            for document in stored
-            if not bool(document["duplicate"])
-        ),
-    }
+
+@router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
+async def queue_document_batch(files: list[UploadFile] = File(...)) -> dict[str, object]:
+    validate_batch(files)
+    uploads = [await read_upload(file) for file in files]
+    database = get_pool()
+    job_dir: Path | None = None
+
+    try:
+        async with database.acquire() as connection, connection.transaction():
+            job_id = await connection.fetchval(
+                "INSERT INTO ingestion_jobs(total_files) VALUES($1) RETURNING id",
+                len(uploads),
+            )
+            job_dir = Path(settings.upload_dir) / str(job_id)
+            job_dir.mkdir(parents=True, exist_ok=True)
+            job_dir.chmod(0o777)
+
+            for filename, content_type, data in uploads:
+                storage_path = job_dir / f"{uuid4().hex}-{filename}"
+                storage_path.write_bytes(data)
+                storage_path.chmod(0o666)
+                await connection.execute(
+                    """
+                    INSERT INTO ingestion_job_files(
+                        job_id, filename, content_type, storage_path
+                    ) VALUES($1, $2, $3, $4)
+                    """,
+                    job_id,
+                    filename,
+                    content_type,
+                    str(storage_path),
+                )
+    except Exception:
+        if job_dir is not None:
+            rmtree(job_dir, ignore_errors=True)
+        raise
+
+    try:
+        process_ingestion_job.delay(job_id)
+    except Exception as error:
+        await database.execute(
+            """
+            UPDATE ingestion_jobs
+            SET status = 'failed', error = $2, updated_at = NOW()
+            WHERE id = $1
+            """,
+            job_id,
+            "Could not enqueue the ingestion job",
+        )
+        raise HTTPException(503, "Background worker queue is unavailable") from error
+
+    return {"job_id": job_id, "status": "queued", "total_files": len(uploads)}
+
+
+@router.get("/jobs/{job_id}")
+async def get_ingestion_job(job_id: int) -> dict[str, object]:
+    job = await get_pool().fetchrow(
+        """
+        SELECT id, status, total_files, processed_files, duplicate_files,
+               attempts, error, created_at, updated_at
+        FROM ingestion_jobs
+        WHERE id = $1
+        """,
+        job_id,
+    )
+    if job is None:
+        raise HTTPException(404, "Ingestion job not found")
+
+    files = await get_pool().fetch(
+        """
+        SELECT id, filename, status, document_id, duplicate, error
+        FROM ingestion_job_files
+        WHERE job_id = $1
+        ORDER BY id
+        """,
+        job_id,
+    )
+    return {**dict(job), "files": [dict(file) for file in files]}
 
 
 @router.get("")
@@ -167,3 +161,17 @@ async def delete_document(document_id: int) -> None:
     result = await get_pool().execute("DELETE FROM documents WHERE id = $1", document_id)
     if result == "DELETE 0":
         raise HTTPException(404, "Document not found")
+
+
+def summarize_upload(stored: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "documents": stored,
+        "total_files": len(stored),
+        "indexed_documents": sum(not bool(document["duplicate"]) for document in stored),
+        "duplicate_documents": sum(bool(document["duplicate"]) for document in stored),
+        "total_chunks": sum(
+            int(document["chunks"])
+            for document in stored
+            if not bool(document["duplicate"])
+        ),
+    }

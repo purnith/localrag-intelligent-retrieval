@@ -18,11 +18,14 @@ type Answer = {
   sources: Source[];
 };
 
-type BatchUploadResponse = {
+type IngestionJob = {
+  id: number;
+  status: "queued" | "processing" | "retrying" | "completed" | "failed";
   total_files: number;
-  indexed_documents: number;
-  duplicate_documents: number;
-  total_chunks: number;
+  processed_files: number;
+  duplicate_files: number;
+  attempts: number;
+  error: string | null;
 };
 
 type DocumentRecord = {
@@ -41,6 +44,7 @@ export default function App() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
   const [files, setFiles] = useState<File[]>([]);
+  const [uploadJob, setUploadJob] = useState<IngestionJob | null>(null);
   const [uploadMessage, setUploadMessage] = useState("");
   const [question, setQuestion] = useState("");
   const [result, setResult] = useState<Answer | null>(null);
@@ -72,6 +76,7 @@ export default function App() {
   function selectFiles(selected: FileList | null) {
     const nextFiles = Array.from(selected ?? []);
     setUploadMessage("");
+    setUploadJob(null);
     if (nextFiles.length > maxBatchFiles) {
       setFiles([]);
       setError(`Select no more than ${maxBatchFiles} documents at once.`);
@@ -90,16 +95,20 @@ export default function App() {
     const body = new FormData();
     files.forEach((file) => body.append("files", file));
     try {
-      const response = await fetch(`${apiUrl}/api/documents/batch`, {
+      const response = await fetch(`${apiUrl}/api/documents/jobs`, {
         method: "POST",
         body,
       });
-      const data: BatchUploadResponse & { detail?: string } = await response.json();
+      const data: { job_id?: number; detail?: string } = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Upload failed");
+      if (!data.job_id) throw new Error("The ingestion job was not created");
+
+      const completedJob = await waitForIngestion(data.job_id);
+      const indexed = completedJob.processed_files - completedJob.duplicate_files;
       setUploadMessage(
-        data.duplicate_documents
-          ? `${data.indexed_documents} new document(s) indexed; ${data.duplicate_documents} duplicate(s) skipped.`
-          : `${data.indexed_documents} document(s) indexed into ${data.total_chunks} chunk(s).`,
+        completedJob.duplicate_files
+          ? `${indexed} new document(s) indexed; ${completedJob.duplicate_files} duplicate(s) skipped.`
+          : `${indexed} document(s) indexed successfully.`,
       );
       setFiles([]);
       await loadDocuments();
@@ -108,6 +117,21 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function waitForIngestion(jobId: number): Promise<IngestionJob> {
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      const response = await fetch(`${apiUrl}/api/documents/jobs/${jobId}`);
+      const data: IngestionJob & { detail?: string } = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "Could not read job status");
+      setUploadJob(data);
+      if (data.status === "completed") return data;
+      if (data.status === "failed") {
+        throw new Error(data.error ?? "Document processing failed");
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    throw new Error("Document processing timed out");
   }
 
   async function deleteDocument(document: DocumentRecord) {
@@ -198,9 +222,31 @@ export default function App() {
               </ul>
             )}
             <button disabled={!files.length || busy}>
-              {busy ? "Working..." : "Upload and index"}
+              {busy ? "Processing..." : "Upload and index"}
             </button>
           </form>
+          {uploadJob && uploadJob.status !== "completed" && (
+            <div className="job-progress" aria-live="polite">
+              <div className="progress-heading">
+                <span>{uploadJob.status}</span>
+                <strong>
+                  {uploadJob.processed_files}/{uploadJob.total_files}
+                </strong>
+              </div>
+              <div className="progress-track">
+                <span
+                  style={{
+                    width: `${Math.round(
+                      (uploadJob.processed_files / uploadJob.total_files) * 100,
+                    )}%`,
+                  }}
+                />
+              </div>
+              {uploadJob.status === "retrying" && (
+                <small>Retrying after a processing error (attempt {uploadJob.attempts})</small>
+              )}
+            </div>
+          )}
           {uploadMessage && <p className="success">{uploadMessage}</p>}
           <div className="document-library">
             <div className="library-heading">

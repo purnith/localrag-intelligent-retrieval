@@ -40,8 +40,12 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://retrieval:local_development_only@postgres:5432/retrieval}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads_data:/data/uploads
     ports:
       - "8000:8000"
     depends_on:
@@ -49,6 +53,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2 --uid=nobody --gid=nogroup
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://retrieval:local_development_only@postgres:5432/retrieval}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      HOME: /tmp
+      PGSSLMODE: disable
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads_data:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
@@ -63,3 +90,4 @@ volumes:
   postgres_data:
   redis_data:
   ollama_data:
+  uploads_data:

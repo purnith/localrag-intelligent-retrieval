@@ -1,0 +1,3 @@
+Northstar Learning Company requires multi-factor authentication for all administrative systems. Access reviews are performed every quarter, and inactive accounts are disabled after thirty days. Security incidents must be reported to the operations team within one hour of discovery.
+
+Production credentials are stored in an approved secrets-management system. Credentials must not be committed to source-control repositories or shared through messaging applications.

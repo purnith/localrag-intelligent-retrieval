@@ -9,8 +9,10 @@ class Settings(BaseSettings):
         "postgresql://retrieval:local_development_only@localhost:5432/retrieval"
     )
     redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: str = "redis://localhost:6379/1"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
+    upload_dir: str = "/data/uploads"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

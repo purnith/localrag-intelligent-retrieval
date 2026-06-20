@@ -50,6 +50,11 @@ button:hover:not(:disabled) { background: #75e7c8; }
 button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .success { color: #75e7c8 !important; }
+.job-progress { display: grid; gap: 8px; margin-top: 14px; padding: 12px; background: #091728; border: 1px solid #294563; border-radius: 10px; }
+.progress-heading { display: flex; justify-content: space-between; color: #9fb0c5; font-size: 0.78rem; text-transform: capitalize; }
+.progress-track { height: 7px; overflow: hidden; background: #162941; border-radius: 999px; }
+.progress-track span { display: block; height: 100%; background: #56dbb7; border-radius: inherit; transition: width 250ms ease; }
+.job-progress small { color: #d2a46f; font-size: 0.72rem; }
 .document-library { margin-top: 28px; padding-top: 20px; border-top: 1px solid #203a57; }
 .library-heading { display: flex; align-items: center; justify-content: space-between; }
 .library-heading h3 { margin: 0; font-size: 0.95rem; }
