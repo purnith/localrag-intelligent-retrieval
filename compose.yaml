@@ -41,6 +41,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://retrieval:local_development_only@postgres:5432/retrieval}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      JWT_SECRET: ${JWT_SECRET:-local_development_secret_change_before_deployment}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-10080}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       UPLOAD_DIR: /data/uploads

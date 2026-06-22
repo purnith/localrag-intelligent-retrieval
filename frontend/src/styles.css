@@ -25,6 +25,17 @@ main { position: relative; width: min(1040px, calc(100% - 40px)); margin: 0 auto
 h1 { margin: 14px 0; font-size: clamp(3rem, 8vw, 6rem); line-height: 0.94; letter-spacing: -0.06em; }
 .subtitle { color: #a6b3c5; max-width: 650px; font-size: 1.16rem; line-height: 1.65; }
 .user-context { display: inline-block; padding: 7px 11px; color: #91a5bd; background: #0b1b2e; border: 1px solid #294563; border-radius: 999px; font-size: 0.78rem; }
+.user-session { display: flex; align-items: center; gap: 9px; }
+.user-session button { padding: 7px 10px; color: #aebccd; background: transparent; border: 1px solid #294563; font-size: 0.72rem; }
+
+.auth-shell { display: grid; min-height: 100vh; place-items: center; padding: 32px 20px; }
+.auth-card { width: min(460px, 100%); padding: 34px; background: rgba(14, 28, 48, 0.92); border: 1px solid #243d5c; border-radius: 18px; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3); }
+.auth-card h1 { font-size: clamp(2.4rem, 9vw, 4.2rem); }
+.auth-card input { width: 100%; padding: 13px 14px; color: #eef3f8; background: #091728; border: 1px solid #294563; border-radius: 10px; outline: none; }
+.auth-card input:focus { border-color: #56dbb7; box-shadow: 0 0 0 3px rgba(86, 219, 183, 0.1); }
+.auth-error { color: #f2a08d; font-size: 0.82rem; }
+.auth-switch { width: 100%; margin-top: 12px; color: #9fb0c5; background: transparent; }
+.auth-switch:hover:not(:disabled) { color: #56dbb7; background: transparent; }
 
 .workspace { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 18px; margin-top: 54px; }
 .panel, .answer-card, .notice {

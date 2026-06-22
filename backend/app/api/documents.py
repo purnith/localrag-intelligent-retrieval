@@ -2,8 +2,9 @@ from pathlib import Path
 from shutil import rmtree
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from app.api.auth import CurrentUser
 from app.config import get_settings
 from app.database import get_pool
 from app.services.indexing import prepare_document_bytes, store_documents
@@ -11,7 +12,8 @@ from app.worker import process_ingestion_job
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 settings = get_settings()
-MAX_FILE_SIZE = 10 * 1024 * 1024
+MAX_FILE_SIZE_MB = 50
+MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
 MAX_BATCH_FILES = 10
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt"}
 
@@ -25,7 +27,9 @@ async def read_upload(file: UploadFile) -> tuple[str, str, bytes]:
 
     data = await file.read(MAX_FILE_SIZE + 1)
     if len(data) > MAX_FILE_SIZE:
-        raise HTTPException(413, f"{filename}: file must be 10 MB or smaller")
+        raise HTTPException(
+            413, f"{filename}: file must be {MAX_FILE_SIZE_MB} MB or smaller"
+        )
     return filename, file.content_type or "application/octet-stream", data
 
 
@@ -48,27 +52,27 @@ async def prepare_upload(file: UploadFile):
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def upload_document(
-    file: UploadFile = File(...), user_id: int = Form(gt=0)
+    current_user: CurrentUser, file: UploadFile = File(...)
 ) -> dict[str, object]:
-    stored = await store_documents([await prepare_upload(file)], user_id)
+    stored = await store_documents([await prepare_upload(file)], current_user.id)
     return stored[0]
 
 
 @router.post("/batch", status_code=status.HTTP_201_CREATED)
 async def upload_document_batch(
+    current_user: CurrentUser,
     files: list[UploadFile] = File(...),
-    user_id: int = Form(gt=0),
 ) -> dict[str, object]:
     validate_batch(files)
     stored = await store_documents(
-        [await prepare_upload(file) for file in files], user_id
+        [await prepare_upload(file) for file in files], current_user.id
     )
     return summarize_upload(stored)
 
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
 async def queue_document_batch(
-    files: list[UploadFile] = File(...), user_id: int = Form(gt=0)
+    current_user: CurrentUser, files: list[UploadFile] = File(...)
 ) -> dict[str, object]:
     validate_batch(files)
     uploads = [await read_upload(file) for file in files]
@@ -80,7 +84,7 @@ async def queue_document_batch(
             job_id = await connection.fetchval(
                 "INSERT INTO ingestion_jobs(total_files, user_id) VALUES($1, $2) RETURNING id",
                 len(uploads),
-                user_id,
+                current_user.id,
             )
             job_dir = Path(settings.upload_dir) / str(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +129,7 @@ async def queue_document_batch(
 
 @router.get("/jobs/{job_id}")
 async def get_ingestion_job(
-    job_id: int, user_id: int = Query(gt=0)
+    job_id: int, current_user: CurrentUser
 ) -> dict[str, object]:
     job = await get_pool().fetchrow(
         """
@@ -135,7 +139,7 @@ async def get_ingestion_job(
         WHERE id = $1 AND user_id = $2
         """,
         job_id,
-        user_id,
+        current_user.id,
     )
     if job is None:
         raise HTTPException(404, "Ingestion job not found")
@@ -153,7 +157,7 @@ async def get_ingestion_job(
 
 
 @router.get("")
-async def list_documents(user_id: int = Query(gt=0)) -> list[dict[str, object]]:
+async def list_documents(current_user: CurrentUser) -> list[dict[str, object]]:
     rows = await get_pool().fetch(
         """
         SELECT d.id, d.filename, d.content_type, d.created_at,
@@ -164,17 +168,19 @@ async def list_documents(user_id: int = Query(gt=0)) -> list[dict[str, object]]:
         GROUP BY d.id
         ORDER BY d.created_at DESC
         """,
-        user_id,
+        current_user.id,
     )
     return [dict(row) for row in rows]
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
-    document_id: int, user_id: int = Query(gt=0)
+    document_id: int, current_user: CurrentUser
 ) -> None:
     result = await get_pool().execute(
-        "DELETE FROM documents WHERE id = $1 AND user_id = $2", document_id, user_id
+        "DELETE FROM documents WHERE id = $1 AND user_id = $2",
+        document_id,
+        current_user.id,
     )
     if result == "DELETE 0":
         raise HTTPException(404, "Document not found")

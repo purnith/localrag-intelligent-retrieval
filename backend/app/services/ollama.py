@@ -4,6 +4,7 @@ from app.config import get_settings
 
 settings = get_settings()
 EMBEDDING_MODEL = "nomic-embed-text"
+EMBEDDING_BATCH_SIZE = 32
 
 
 async def chat(
@@ -24,13 +25,19 @@ async def chat(
 
 
 async def create_embeddings(texts: list[str]) -> list[list[float]]:
+    embeddings: list[list[float]] = []
     async with httpx.AsyncClient(timeout=180) as client:
-        response = await client.post(
-            f"{settings.ollama_url}/api/embed",
-            json={"model": EMBEDDING_MODEL, "input": texts},
-        )
-        response.raise_for_status()
-        return response.json()["embeddings"]
+        for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+            response = await client.post(
+                f"{settings.ollama_url}/api/embed",
+                json={
+                    "model": EMBEDDING_MODEL,
+                    "input": texts[start : start + EMBEDDING_BATCH_SIZE],
+                },
+            )
+            response.raise_for_status()
+            embeddings.extend(response.json()["embeddings"])
+    return embeddings
 
 
 async def generate_grounded_answer(

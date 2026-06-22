@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
+from app.api.auth import CurrentUser
 from app.database import get_pool
 from app.schemas import AskResponse, QueryRequest, SearchResult
 from app.services.memory import (
@@ -63,23 +64,27 @@ async def search_chunks(
 
 
 @router.post("/search", response_model=list[SearchResult])
-async def semantic_search(request: QueryRequest) -> list[SearchResult]:
+async def semantic_search(
+    request: QueryRequest, current_user: CurrentUser
+) -> list[SearchResult]:
     return await search_chunks(
-        request.query, request.limit, request.user_id, request.document_ids
+        request.query, request.limit, current_user.id, request.document_ids
     )
 
 
 @router.post("/ask", response_model=AskResponse)
-async def ask_documents(request: QueryRequest) -> AskResponse:
+async def ask_documents(
+    request: QueryRequest, current_user: CurrentUser
+) -> AskResponse:
     conversation_id = await get_or_create_conversation(
-        request.user_id, request.conversation_id, request.query
+        current_user.id, request.conversation_id, request.query
     )
     history = await load_recent_history(conversation_id)
     await save_message(conversation_id, "user", request.query)
 
     retrieval_query = build_contextual_query(request.query, history)
     sources = await search_chunks(
-        retrieval_query, request.limit, request.user_id, request.document_ids
+        retrieval_query, request.limit, current_user.id, request.document_ids
     )
     if not sources:
         answer = "The selected documents do not contain enough relevant information to answer that question."

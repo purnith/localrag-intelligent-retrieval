@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:3b"
     upload_dir: str = "/data/uploads"
+    jwt_secret: str = "local_development_secret_change_before_deployment"
+    jwt_expiration_minutes: int = 10080
+    cookie_secure: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -37,6 +37,7 @@ try {
         --namespace localrag `
         --from-literal=POSTGRES_PASSWORD=local_development_only `
         --from-literal=DATABASE_URL=postgresql://retrieval:local_development_only@postgres:5432/retrieval `
+        --from-literal=JWT_SECRET=local_development_secret_change_before_deployment `
         --dry-run=client -o yaml | kubectl apply -f -
 
     kubectl apply -k k8s/base

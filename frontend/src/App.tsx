@@ -21,7 +21,7 @@ type Answer = {
   tool_trace: string[];
 };
 
-type User = { id: number; display_name: string };
+type User = { id: number; display_name: string; email: string };
 type Conversation = { id: number; title: string; messages: number };
 type Message = { id: number; role: "user" | "assistant"; content: string };
 
@@ -46,9 +46,18 @@ type DocumentRecord = {
 const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const maxBatchFiles = 10;
 
+function apiFetch(path: string, options: RequestInit = {}) {
+  return fetch(`${apiUrl}${path}`, { ...options, credentials: "include" });
+}
+
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -63,44 +72,65 @@ export default function App() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`${apiUrl}/api/health`)
+    apiFetch("/api/health")
       .then((response) => response.json())
       .then(setHealth)
       .catch(() => setHealth(null));
-    initializeUser();
+    checkSession();
   }, []);
 
-  async function initializeUser() {
+  async function checkSession() {
     try {
-      const savedId = window.localStorage.getItem("localrag_user_id");
-      let currentUser: User | null = null;
-      if (savedId) {
-        const response = await fetch(`${apiUrl}/api/users/${savedId}`);
-        if (response.ok) currentUser = await response.json();
+      const response = await apiFetch("/api/auth/me");
+      if (response.ok) {
+        const currentUser: User = await response.json();
+        setUser(currentUser);
+        await Promise.all([loadDocuments(), loadConversations()]);
       }
-      if (!currentUser) {
-        const response = await fetch(`${apiUrl}/api/users`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ display_name: "Purnith" }),
-        });
-        if (!response.ok) throw new Error("Could not initialize user context");
-        const createdUser: User = await response.json();
-        currentUser = createdUser;
-        window.localStorage.setItem("localrag_user_id", String(createdUser.id));
-      }
-      if (!currentUser) throw new Error("Could not initialize user context");
-      setUser(currentUser);
-      await Promise.all([loadDocuments(currentUser.id), loadConversations(currentUser.id)]);
-    } catch (contextError) {
-      setError(contextError instanceof Error ? contextError.message : "User context failed");
+    } finally {
+      setAuthReady(true);
     }
   }
 
-  async function loadDocuments(userId = user?.id) {
-    if (!userId) return;
+  async function submitAuthentication(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
     try {
-      const response = await fetch(`${apiUrl}/api/documents?user_id=${userId}`);
+      const response = await apiFetch(`/api/auth/${authMode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          authMode === "register"
+            ? { display_name: displayName, email, password }
+            : { email, password },
+        ),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "Authentication failed");
+      setUser(data);
+      setPassword("");
+      await Promise.all([loadDocuments(), loadConversations()]);
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Authentication failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logout() {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
+    setDocuments([]);
+    setConversations([]);
+    setMessages([]);
+    setConversationId(null);
+    setResult(null);
+  }
+
+  async function loadDocuments() {
+    try {
+      const response = await apiFetch("/api/documents");
       if (!response.ok) return;
       const data: DocumentRecord[] = await response.json();
       setDocuments(data);
@@ -112,9 +142,8 @@ export default function App() {
     }
   }
 
-  async function loadConversations(userId = user?.id) {
-    if (!userId) return;
-    const response = await fetch(`${apiUrl}/api/conversations?user_id=${userId}`);
+  async function loadConversations() {
+    const response = await apiFetch("/api/conversations");
     if (response.ok) setConversations(await response.json());
   }
 
@@ -124,9 +153,7 @@ export default function App() {
       setMessages([]);
       return;
     }
-    const response = await fetch(
-      `${apiUrl}/api/conversations/${id}/messages?user_id=${user.id}`,
-    );
+    const response = await apiFetch(`/api/conversations/${id}/messages`);
     if (response.ok) setMessages(await response.json());
   }
 
@@ -152,9 +179,8 @@ export default function App() {
     const body = new FormData();
     files.forEach((file) => body.append("files", file));
     if (!user) return;
-    body.append("user_id", String(user.id));
     try {
-      const response = await fetch(`${apiUrl}/api/documents/jobs`, {
+      const response = await apiFetch("/api/documents/jobs", {
         method: "POST",
         body,
       });
@@ -162,7 +188,7 @@ export default function App() {
       if (!response.ok) throw new Error(data.detail ?? "Upload failed");
       if (!data.job_id) throw new Error("The ingestion job was not created");
 
-      const completedJob = await waitForIngestion(data.job_id, user.id);
+      const completedJob = await waitForIngestion(data.job_id);
       const indexed = completedJob.processed_files - completedJob.duplicate_files;
       setUploadMessage(
         completedJob.duplicate_files
@@ -170,7 +196,7 @@ export default function App() {
           : `${indexed} document(s) indexed successfully.`,
       );
       setFiles([]);
-      await loadDocuments(user.id);
+      await loadDocuments();
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
     } finally {
@@ -178,11 +204,9 @@ export default function App() {
     }
   }
 
-  async function waitForIngestion(jobId: number, userId: number): Promise<IngestionJob> {
+  async function waitForIngestion(jobId: number): Promise<IngestionJob> {
     for (let attempt = 0; attempt < 300; attempt += 1) {
-      const response = await fetch(
-        `${apiUrl}/api/documents/jobs/${jobId}?user_id=${userId}`,
-      );
+      const response = await apiFetch(`/api/documents/jobs/${jobId}`);
       const data: IngestionJob & { detail?: string } = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Could not read job status");
       setUploadJob(data);
@@ -200,14 +224,14 @@ export default function App() {
     if (!window.confirm(`Delete ${document.filename} from the knowledge base?`)) return;
     setError("");
     try {
-      const response = await fetch(`${apiUrl}/api/documents/${document.id}?user_id=${user.id}`, {
+      const response = await apiFetch(`/api/documents/${document.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.detail ?? "Delete failed");
       }
-      await loadDocuments(user.id);
+      await loadDocuments();
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Delete failed");
     }
@@ -228,12 +252,11 @@ export default function App() {
     setError("");
     setResult(null);
     try {
-      const response = await fetch(`${apiUrl}/api/agent/ask`, {
+      const response = await apiFetch("/api/agent/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: question,
-          user_id: user.id,
           conversation_id: conversationId,
           limit: 5,
           document_ids: selectedDocumentIds.length ? selectedDocumentIds : null,
@@ -245,7 +268,7 @@ export default function App() {
       setConversationId(data.conversation_id);
       setQuestion("");
       await Promise.all([
-        loadConversations(user.id),
+        loadConversations(),
         selectConversation(data.conversation_id),
       ]);
     } catch (askError) {
@@ -253,6 +276,75 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (!authReady) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <p className="eyebrow">SECURE WORKSPACE</p>
+          <h1>Loading...</h1>
+        </section>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <p className="eyebrow">LOCALRAG AGENT</p>
+          <h1>{authMode === "login" ? "Welcome back." : "Create your workspace."}</h1>
+          <p className="subtitle">
+            Sign in to access your documents, conversations, and agent memory.
+          </p>
+          <form onSubmit={submitAuthentication}>
+            {authMode === "register" && (
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                placeholder="Display name"
+                autoComplete="name"
+                required
+              />
+            )}
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Email address"
+              autoComplete="email"
+              required
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Password"
+              autoComplete={authMode === "login" ? "current-password" : "new-password"}
+              minLength={authMode === "register" ? 8 : undefined}
+              required
+            />
+            <button disabled={busy}>
+              {busy ? "Please wait..." : authMode === "login" ? "Sign in" : "Create account"}
+            </button>
+          </form>
+          {error && <p className="auth-error">{error}</p>}
+          <button
+            type="button"
+            className="auth-switch"
+            onClick={() => {
+              setAuthMode(authMode === "login" ? "register" : "login");
+              setError("");
+            }}
+          >
+            {authMode === "login"
+              ? "Need an account? Register"
+              : "Already registered? Sign in"}
+          </button>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -263,14 +355,17 @@ export default function App() {
         <p className="subtitle">
           Upload multiple documents, ask a question, and inspect the evidence behind the answer.
         </p>
-        {user && <p className="user-context">Context profile: {user.display_name}</p>}
+        <div className="user-session">
+          <p className="user-context">Signed in as {user.display_name}</p>
+          <button type="button" onClick={logout}>Sign out</button>
+        </div>
       </section>
 
       <section className="workspace">
         <article className="panel">
           <span className="step">01</span>
           <h2>Add knowledge</h2>
-          <p>Up to 10 PDF, DOCX, or TXT files / maximum 10 MB each</p>
+          <p>Up to 10 PDF, DOCX, or TXT files / maximum 50 MB each</p>
           <form onSubmit={uploadDocuments}>
             <label className="file-input">
               <input

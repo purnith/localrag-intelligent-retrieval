@@ -10,7 +10,8 @@ PostgreSQL/pgvector, Redis, Ollama, Docker Compose, and Kubernetes.
 
 ## Features
 
-- Upload and index batches of up to 10 PDF, DOCX, and TXT documents, 10 MB each
+- Upload and index batches of up to 10 PDF, DOCX, and TXT documents, 50 MB each
+- Generate embeddings in bounded batches for reliable large-document ingestion
 - Extract and split document text into overlapping chunks
 - Generate semantic embeddings with `nomic-embed-text`
 - Store and search vectors with PostgreSQL and pgvector
@@ -30,6 +31,8 @@ PostgreSQL/pgvector, Redis, Ollama, Docker Compose, and Kubernetes.
 - Route requests through an LLM-driven agent planner
 - Execute document search, summarization, conversation-memory, and clarification tools
 - Return an observable tool trace with each agent response
+- Register and authenticate users with Argon2 password hashing
+- Protect user data with signed, HTTP-only session cookies and server-side authorization
 - Check PostgreSQL, Redis, Ollama, and API availability concurrently
 - Run the complete system with Docker Compose
 - Deploy the platform to a local Kubernetes cluster with persistent storage,
@@ -83,6 +86,7 @@ Question
 | API | FastAPI, Pydantic | Validation, orchestration, and REST endpoints |
 | Database | PostgreSQL, pgvector | Document metadata, chunks, and vector search |
 | Memory | PostgreSQL | User profiles, conversations, and durable message history |
+| Authentication | Argon2, JWT, HTTP-only cookies | Password protection, sessions, and user authorization |
 | Cache | Redis | Foundation for caching and session state |
 | Worker | Celery | Background ingestion, progress, and retry handling |
 | Agent | Ollama-powered planner and Python tools | Request routing and tool execution |
@@ -118,6 +122,10 @@ Open the application:
 - Web interface: http://localhost:5173
 - Interactive API documentation: http://localhost:8000/docs
 - Service health: http://localhost:8000/api/health
+
+Create an account from the web interface. Authentication sessions are stored in
+signed, HTTP-only cookies. For deployments beyond local development, configure
+a strong `JWT_SECRET`, enable `COOKIE_SECURE`, and terminate traffic with HTTPS.
 
 Stop the services:
 
@@ -174,7 +182,10 @@ Delete the local cluster when it is no longer needed:
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/health` | Report component availability |
-| `POST` | `/api/users` | Create a user context profile |
+| `POST` | `/api/auth/register` | Register an account and create a session |
+| `POST` | `/api/auth/login` | Authenticate and create a session |
+| `GET` | `/api/auth/me` | Return the authenticated user |
+| `POST` | `/api/auth/logout` | End the current session |
 | `GET` | `/api/conversations` | List a user's conversations |
 | `GET` | `/api/conversations/{id}/messages` | Read persistent conversation history |
 | `POST` | `/api/documents` | Upload, extract, embed, and index a document |
@@ -218,7 +229,7 @@ workers, retrieval services, and agent workflows as operational requirements
 grow.
 
 - Redis is connected and monitored but caching is not implemented yet.
-- User context is identified by profile ID; authentication is not yet implemented.
+- Login rate limiting, password recovery, and email verification are not currently implemented.
 - Scanned PDFs require OCR, which is not currently included.
 - Vector search currently uses exact cosine distance without an approximate index.
 - Model quality and inference latency depend on available hardware.

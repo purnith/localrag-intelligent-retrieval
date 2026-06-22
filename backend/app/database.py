@@ -23,6 +23,16 @@ async def initialize_database() -> None:
         await connection.execute(
             "INSERT INTO users(display_name) SELECT 'Default User' WHERE NOT EXISTS (SELECT 1 FROM users)"
         )
+        await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT")
+        await connection.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT"
+        )
+        await connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx
+            ON users(LOWER(email)) WHERE email IS NOT NULL
+            """
+        )
         await connection.execute(
             """
             CREATE TABLE IF NOT EXISTS documents (

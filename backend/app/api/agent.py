@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
+from app.api.auth import CurrentUser
 from app.api.retrieval import search_chunks
 from app.database import get_pool
 from app.schemas import AgentResponse, QueryRequest, SearchResult
@@ -35,9 +36,9 @@ async def load_summary_sources(
 
 
 @router.post("/ask", response_model=AgentResponse)
-async def agent_ask(request: QueryRequest) -> AgentResponse:
+async def agent_ask(request: QueryRequest, current_user: CurrentUser) -> AgentResponse:
     conversation_id = await get_or_create_conversation(
-        request.user_id, request.conversation_id, request.query
+        current_user.id, request.conversation_id, request.query
     )
     history = await load_recent_history(conversation_id)
     decision = await choose_agent_action(request.query, history)
@@ -58,7 +59,7 @@ async def agent_ask(request: QueryRequest) -> AgentResponse:
             )
         elif decision.action == "summarize_documents":
             trace.append("document_store:loaded")
-            sources = await load_summary_sources(request.user_id, request.document_ids)
+            sources = await load_summary_sources(current_user.id, request.document_ids)
             answer = (
                 await generate_document_summary(
                     decision.tool_input, [source.content for source in sources]
@@ -71,7 +72,7 @@ async def agent_ask(request: QueryRequest) -> AgentResponse:
             sources = await search_chunks(
                 decision.tool_input,
                 request.limit,
-                request.user_id,
+                current_user.id,
                 request.document_ids,
             )
             answer = (
