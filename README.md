@@ -24,6 +24,12 @@ PostgreSQL/pgvector, Redis, Ollama, Docker Compose, and Kubernetes.
 - Process document ingestion through a Redis-backed Celery worker
 - Track queued, processing, retrying, completed, and failed jobs
 - Retry transient ingestion failures with exponential backoff
+- Isolate documents and retrieval results by user profile
+- Persist conversations and source-grounded message history in PostgreSQL
+- Resolve follow-up questions using recent conversational context
+- Route requests through an LLM-driven agent planner
+- Execute document search, summarization, conversation-memory, and clarification tools
+- Return an observable tool trace with each agent response
 - Check PostgreSQL, Redis, Ollama, and API availability concurrently
 - Run the complete system with Docker Compose
 - Deploy the platform to a local Kubernetes cluster with persistent storage,
@@ -37,7 +43,9 @@ React + TypeScript
         | REST/JSON
         v
 FastAPI application ---> Redis broker ---> Celery workers
-   |                                          |
+   |                    Agent planner          |
+   |                  /   |    |    \          |
+   |             search summary memory clarify|
    v                                          v
 PostgreSQL + pgvector <-------------------- Ollama
 ```
@@ -59,6 +67,7 @@ Document upload
 
 ```text
 Question
+  -> user and conversation context
   -> question embedding
   -> cosine-similarity search
   -> relevant document chunks
@@ -73,8 +82,10 @@ Question
 | Frontend | React, TypeScript, Vite | Upload and question-answering interface |
 | API | FastAPI, Pydantic | Validation, orchestration, and REST endpoints |
 | Database | PostgreSQL, pgvector | Document metadata, chunks, and vector search |
+| Memory | PostgreSQL | User profiles, conversations, and durable message history |
 | Cache | Redis | Foundation for caching and session state |
 | Worker | Celery | Background ingestion, progress, and retry handling |
+| Agent | Ollama-powered planner and Python tools | Request routing and tool execution |
 | AI runtime | Ollama | Model serving and inference |
 | Generation model | Qwen 2.5 3B | Grounded natural-language answers |
 | Embedding model | nomic-embed-text | 768-dimensional semantic embeddings |
@@ -163,6 +174,9 @@ Delete the local cluster when it is no longer needed:
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/health` | Report component availability |
+| `POST` | `/api/users` | Create a user context profile |
+| `GET` | `/api/conversations` | List a user's conversations |
+| `GET` | `/api/conversations/{id}/messages` | Read persistent conversation history |
 | `POST` | `/api/documents` | Upload, extract, embed, and index a document |
 | `POST` | `/api/documents/batch` | Upload and index multiple documents atomically |
 | `POST` | `/api/documents/jobs` | Queue an asynchronous document-ingestion job |
@@ -171,6 +185,7 @@ Delete the local cluster when it is no longer needed:
 | `DELETE` | `/api/documents/{id}` | Delete a document and its chunks |
 | `POST` | `/api/search` | Retrieve semantically similar chunks |
 | `POST` | `/api/ask` | Retrieve evidence and generate a grounded answer |
+| `POST` | `/api/agent/ask` | Plan and execute an agent tool with persistent context |
 
 ## Example
 
@@ -203,18 +218,18 @@ workers, retrieval services, and agent workflows as operational requirements
 grow.
 
 - Redis is connected and monitored but caching is not implemented yet.
-- Authentication and per-user document authorization are not implemented.
+- User context is identified by profile ID; authentication is not yet implemented.
 - Scanned PDFs require OCR, which is not currently included.
 - Vector search currently uses exact cosine distance without an approximate index.
 - Model quality and inference latency depend on available hardware.
 
 ## Roadmap
 
-- Redis query caching and conversation sessions
+- Redis query caching
 - Configurable retrieval thresholds and local reranking
 - Reranking and retrieval-quality evaluation
 - Authentication and document-level authorization
-- Specialized routing, retrieval, synthesis, and evaluation agents
+- Multi-agent retrieval, synthesis, and evaluation workflows
 - Load testing, observability, retries, and horizontal scaling
 
 ## Deployment and data boundary

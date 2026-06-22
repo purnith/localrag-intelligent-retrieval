@@ -2,6 +2,12 @@ from fastapi import APIRouter, HTTPException
 
 from app.database import get_pool
 from app.schemas import AskResponse, QueryRequest, SearchResult
+from app.services.memory import (
+    build_contextual_query,
+    get_or_create_conversation,
+    load_recent_history,
+    save_message,
+)
 from app.services.ollama import create_embeddings, generate_grounded_answer
 
 router = APIRouter(prefix="/api", tags=["retrieval"])
@@ -9,7 +15,7 @@ MIN_VECTOR_SIMILARITY = 0.5
 
 
 async def search_chunks(
-    query: str, limit: int, document_ids: list[int] | None = None
+    query: str, limit: int, user_id: int, document_ids: list[int] | None = None
 ) -> list[SearchResult]:
     try:
         query_embedding = (await create_embeddings([query]))[0]
@@ -29,24 +35,26 @@ async def search_chunks(
                    END AS keyword_score
             FROM document_chunks c
             JOIN documents d ON d.id = c.document_id
-            WHERE ($3::bigint[] IS NULL OR d.id = ANY($3::bigint[]))
+            WHERE d.user_id = $3
+              AND ($4::bigint[] IS NULL OR d.id = ANY($4::bigint[]))
         ),
         deduplicated AS (
             SELECT DISTINCT ON (md5(content))
                    chunk_id, document_id, filename, content,
                    (0.8 * vector_score + 0.2 * keyword_score) AS score
             FROM scored
-            WHERE vector_score >= $4
+            WHERE vector_score >= $5
             ORDER BY md5(content),
                      (0.8 * vector_score + 0.2 * keyword_score) DESC
         )
         SELECT chunk_id, document_id, filename, content, score
         FROM deduplicated
         ORDER BY score DESC
-        LIMIT $5
+        LIMIT $6
         """,
         str(query_embedding),
         query,
+        user_id,
         document_ids or None,
         MIN_VECTOR_SIMILARITY,
         limit,
@@ -56,21 +64,34 @@ async def search_chunks(
 
 @router.post("/search", response_model=list[SearchResult])
 async def semantic_search(request: QueryRequest) -> list[SearchResult]:
-    return await search_chunks(request.query, request.limit, request.document_ids)
+    return await search_chunks(
+        request.query, request.limit, request.user_id, request.document_ids
+    )
 
 
 @router.post("/ask", response_model=AskResponse)
 async def ask_documents(request: QueryRequest) -> AskResponse:
-    sources = await search_chunks(request.query, request.limit, request.document_ids)
+    conversation_id = await get_or_create_conversation(
+        request.user_id, request.conversation_id, request.query
+    )
+    history = await load_recent_history(conversation_id)
+    await save_message(conversation_id, "user", request.query)
+
+    retrieval_query = build_contextual_query(request.query, history)
+    sources = await search_chunks(
+        retrieval_query, request.limit, request.user_id, request.document_ids
+    )
     if not sources:
-        return AskResponse(
-            answer="The selected documents do not contain enough relevant information to answer that question.",
-            sources=[],
-        )
+        answer = "The selected documents do not contain enough relevant information to answer that question."
+        await save_message(conversation_id, "assistant", answer, [])
+        return AskResponse(answer=answer, sources=[], conversation_id=conversation_id)
     try:
         answer = await generate_grounded_answer(
-            request.query, [source.content for source in sources]
+            request.query, [source.content for source in sources], history
         )
     except Exception as error:
         raise HTTPException(503, "The local language model is unavailable") from error
-    return AskResponse(answer=answer, sources=sources)
+    await save_message(conversation_id, "assistant", answer, sources)
+    return AskResponse(
+        answer=answer, sources=sources, conversation_id=conversation_id
+    )

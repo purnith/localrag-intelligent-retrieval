@@ -33,7 +33,7 @@ async def prepare_document_bytes(
 
 
 async def store_documents(
-    documents: list[PreparedDocument],
+    documents: list[PreparedDocument], user_id: int
 ) -> list[dict[str, object]]:
     stored: list[dict[str, object]] = []
     database = get_pool()
@@ -44,10 +44,11 @@ async def store_documents(
                 SELECT d.id, COUNT(c.id)::int AS chunks
                 FROM documents d
                 LEFT JOIN document_chunks c ON c.document_id = d.id
-                WHERE d.content_hash = $1
+                WHERE d.content_hash = $1 AND d.user_id = $2
                 GROUP BY d.id
                 """,
                 document.content_hash,
+                user_id,
             )
             if existing is not None:
                 stored.append(
@@ -62,13 +63,14 @@ async def store_documents(
 
             document_id = await connection.fetchval(
                 """
-                INSERT INTO documents(filename, content_type, content_hash)
-                VALUES($1, $2, $3)
+                INSERT INTO documents(filename, content_type, content_hash, user_id)
+                VALUES($1, $2, $3, $4)
                 RETURNING id
                 """,
                 document.filename,
                 document.content_type,
                 document.content_hash,
+                user_id,
             )
             await connection.executemany(
                 """

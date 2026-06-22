@@ -39,6 +39,11 @@ async def process_job(job_id: int) -> None:
             """,
             job_id,
         )
+        user_id = await database.fetchval(
+            "SELECT user_id FROM ingestion_jobs WHERE id = $1", job_id
+        )
+        if user_id is None:
+            raise ValueError("Ingestion job does not exist")
 
         for file in files:
             await database.execute(
@@ -49,7 +54,7 @@ async def process_job(job_id: int) -> None:
             prepared = await prepare_document_bytes(
                 file["filename"], file["content_type"], data
             )
-            stored = (await store_documents([prepared]))[0]
+            stored = (await store_documents([prepared], user_id))[0]
             await database.execute(
                 """
                 UPDATE ingestion_job_files

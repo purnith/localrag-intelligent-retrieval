@@ -16,7 +16,14 @@ type Source = {
 type Answer = {
   answer: string;
   sources: Source[];
+  conversation_id: number;
+  action: string;
+  tool_trace: string[];
 };
+
+type User = { id: number; display_name: string };
+type Conversation = { id: number; title: string; messages: number };
+type Message = { id: number; role: "user" | "assistant"; content: string };
 
 type IngestionJob = {
   id: number;
@@ -41,6 +48,10 @@ const maxBatchFiles = 10;
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState<number | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
   const [files, setFiles] = useState<File[]>([]);
@@ -56,12 +67,40 @@ export default function App() {
       .then((response) => response.json())
       .then(setHealth)
       .catch(() => setHealth(null));
-    loadDocuments();
+    initializeUser();
   }, []);
 
-  async function loadDocuments() {
+  async function initializeUser() {
     try {
-      const response = await fetch(`${apiUrl}/api/documents`);
+      const savedId = window.localStorage.getItem("localrag_user_id");
+      let currentUser: User | null = null;
+      if (savedId) {
+        const response = await fetch(`${apiUrl}/api/users/${savedId}`);
+        if (response.ok) currentUser = await response.json();
+      }
+      if (!currentUser) {
+        const response = await fetch(`${apiUrl}/api/users`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: "Purnith" }),
+        });
+        if (!response.ok) throw new Error("Could not initialize user context");
+        const createdUser: User = await response.json();
+        currentUser = createdUser;
+        window.localStorage.setItem("localrag_user_id", String(createdUser.id));
+      }
+      if (!currentUser) throw new Error("Could not initialize user context");
+      setUser(currentUser);
+      await Promise.all([loadDocuments(currentUser.id), loadConversations(currentUser.id)]);
+    } catch (contextError) {
+      setError(contextError instanceof Error ? contextError.message : "User context failed");
+    }
+  }
+
+  async function loadDocuments(userId = user?.id) {
+    if (!userId) return;
+    try {
+      const response = await fetch(`${apiUrl}/api/documents?user_id=${userId}`);
       if (!response.ok) return;
       const data: DocumentRecord[] = await response.json();
       setDocuments(data);
@@ -71,6 +110,24 @@ export default function App() {
     } catch {
       // The health indicator already communicates that the API is unavailable.
     }
+  }
+
+  async function loadConversations(userId = user?.id) {
+    if (!userId) return;
+    const response = await fetch(`${apiUrl}/api/conversations?user_id=${userId}`);
+    if (response.ok) setConversations(await response.json());
+  }
+
+  async function selectConversation(id: number | null) {
+    setConversationId(id);
+    if (!id || !user) {
+      setMessages([]);
+      return;
+    }
+    const response = await fetch(
+      `${apiUrl}/api/conversations/${id}/messages?user_id=${user.id}`,
+    );
+    if (response.ok) setMessages(await response.json());
   }
 
   function selectFiles(selected: FileList | null) {
@@ -94,6 +151,8 @@ export default function App() {
     setUploadMessage("");
     const body = new FormData();
     files.forEach((file) => body.append("files", file));
+    if (!user) return;
+    body.append("user_id", String(user.id));
     try {
       const response = await fetch(`${apiUrl}/api/documents/jobs`, {
         method: "POST",
@@ -103,7 +162,7 @@ export default function App() {
       if (!response.ok) throw new Error(data.detail ?? "Upload failed");
       if (!data.job_id) throw new Error("The ingestion job was not created");
 
-      const completedJob = await waitForIngestion(data.job_id);
+      const completedJob = await waitForIngestion(data.job_id, user.id);
       const indexed = completedJob.processed_files - completedJob.duplicate_files;
       setUploadMessage(
         completedJob.duplicate_files
@@ -111,7 +170,7 @@ export default function App() {
           : `${indexed} document(s) indexed successfully.`,
       );
       setFiles([]);
-      await loadDocuments();
+      await loadDocuments(user.id);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");
     } finally {
@@ -119,9 +178,11 @@ export default function App() {
     }
   }
 
-  async function waitForIngestion(jobId: number): Promise<IngestionJob> {
+  async function waitForIngestion(jobId: number, userId: number): Promise<IngestionJob> {
     for (let attempt = 0; attempt < 300; attempt += 1) {
-      const response = await fetch(`${apiUrl}/api/documents/jobs/${jobId}`);
+      const response = await fetch(
+        `${apiUrl}/api/documents/jobs/${jobId}?user_id=${userId}`,
+      );
       const data: IngestionJob & { detail?: string } = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Could not read job status");
       setUploadJob(data);
@@ -135,17 +196,18 @@ export default function App() {
   }
 
   async function deleteDocument(document: DocumentRecord) {
+    if (!user) return;
     if (!window.confirm(`Delete ${document.filename} from the knowledge base?`)) return;
     setError("");
     try {
-      const response = await fetch(`${apiUrl}/api/documents/${document.id}`, {
+      const response = await fetch(`${apiUrl}/api/documents/${document.id}?user_id=${user.id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.detail ?? "Delete failed");
       }
-      await loadDocuments();
+      await loadDocuments(user.id);
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Delete failed");
     }
@@ -161,16 +223,18 @@ export default function App() {
 
   async function askQuestion(event: FormEvent) {
     event.preventDefault();
-    if (!question.trim()) return;
+    if (!question.trim() || !user) return;
     setBusy(true);
     setError("");
     setResult(null);
     try {
-      const response = await fetch(`${apiUrl}/api/ask`, {
+      const response = await fetch(`${apiUrl}/api/agent/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: question,
+          user_id: user.id,
+          conversation_id: conversationId,
           limit: 5,
           document_ids: selectedDocumentIds.length ? selectedDocumentIds : null,
         }),
@@ -178,6 +242,12 @@ export default function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail ?? "Question failed");
       setResult(data);
+      setConversationId(data.conversation_id);
+      setQuestion("");
+      await Promise.all([
+        loadConversations(user.id),
+        selectConversation(data.conversation_id),
+      ]);
     } catch (askError) {
       setError(askError instanceof Error ? askError.message : "Question failed");
     } finally {
@@ -193,6 +263,7 @@ export default function App() {
         <p className="subtitle">
           Upload multiple documents, ask a question, and inspect the evidence behind the answer.
         </p>
+        {user && <p className="user-context">Context profile: {user.display_name}</p>}
       </section>
 
       <section className="workspace">
@@ -290,6 +361,34 @@ export default function App() {
         <article className="panel question-panel">
           <span className="step">02</span>
           <h2>Ask a question</h2>
+          <div className="conversation-controls">
+            <select
+              value={conversationId ?? ""}
+              onChange={(event) =>
+                selectConversation(event.target.value ? Number(event.target.value) : null)
+              }
+            >
+              <option value="">New conversation</option>
+              {conversations.map((conversation) => (
+                <option key={conversation.id} value={conversation.id}>
+                  {conversation.title}
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={() => selectConversation(null)}>
+              New
+            </button>
+          </div>
+          {messages.length > 0 && (
+            <div className="conversation-memory">
+              {messages.slice(-6).map((message) => (
+                <p key={message.id} className={message.role}>
+                  <strong>{message.role === "user" ? "You" : "Assistant"}</strong>
+                  {message.content}
+                </p>
+              ))}
+            </div>
+          )}
           <form onSubmit={askQuestion}>
             <textarea
               value={question}
@@ -308,8 +407,12 @@ export default function App() {
 
       {result && (
         <section className="answer-card">
-          <p className="eyebrow">GROUNDED ANSWER</p>
+          <div className="agent-heading">
+            <p className="eyebrow">AGENT ANSWER</p>
+            <span>{result.action.replaceAll("_", " ")}</span>
+          </div>
           <div className="answer">{result.answer}</div>
+          <p className="tool-trace">{result.tool_trace.join(" → ")}</p>
           <h3>Retrieved sources</h3>
           <div className="source-list">
             {result.sources.map((source, index) => (

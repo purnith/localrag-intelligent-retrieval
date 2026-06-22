@@ -2,7 +2,7 @@ from pathlib import Path
 from shutil import rmtree
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 
 from app.config import get_settings
 from app.database import get_pool
@@ -47,22 +47,29 @@ async def prepare_upload(file: UploadFile):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def upload_document(file: UploadFile = File(...)) -> dict[str, object]:
-    stored = await store_documents([await prepare_upload(file)])
+async def upload_document(
+    file: UploadFile = File(...), user_id: int = Form(gt=0)
+) -> dict[str, object]:
+    stored = await store_documents([await prepare_upload(file)], user_id)
     return stored[0]
 
 
 @router.post("/batch", status_code=status.HTTP_201_CREATED)
 async def upload_document_batch(
     files: list[UploadFile] = File(...),
+    user_id: int = Form(gt=0),
 ) -> dict[str, object]:
     validate_batch(files)
-    stored = await store_documents([await prepare_upload(file) for file in files])
+    stored = await store_documents(
+        [await prepare_upload(file) for file in files], user_id
+    )
     return summarize_upload(stored)
 
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
-async def queue_document_batch(files: list[UploadFile] = File(...)) -> dict[str, object]:
+async def queue_document_batch(
+    files: list[UploadFile] = File(...), user_id: int = Form(gt=0)
+) -> dict[str, object]:
     validate_batch(files)
     uploads = [await read_upload(file) for file in files]
     database = get_pool()
@@ -71,8 +78,9 @@ async def queue_document_batch(files: list[UploadFile] = File(...)) -> dict[str,
     try:
         async with database.acquire() as connection, connection.transaction():
             job_id = await connection.fetchval(
-                "INSERT INTO ingestion_jobs(total_files) VALUES($1) RETURNING id",
+                "INSERT INTO ingestion_jobs(total_files, user_id) VALUES($1, $2) RETURNING id",
                 len(uploads),
+                user_id,
             )
             job_dir = Path(settings.upload_dir) / str(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
@@ -116,15 +124,18 @@ async def queue_document_batch(files: list[UploadFile] = File(...)) -> dict[str,
 
 
 @router.get("/jobs/{job_id}")
-async def get_ingestion_job(job_id: int) -> dict[str, object]:
+async def get_ingestion_job(
+    job_id: int, user_id: int = Query(gt=0)
+) -> dict[str, object]:
     job = await get_pool().fetchrow(
         """
         SELECT id, status, total_files, processed_files, duplicate_files,
                attempts, error, created_at, updated_at
         FROM ingestion_jobs
-        WHERE id = $1
+        WHERE id = $1 AND user_id = $2
         """,
         job_id,
+        user_id,
     )
     if job is None:
         raise HTTPException(404, "Ingestion job not found")
@@ -142,23 +153,29 @@ async def get_ingestion_job(job_id: int) -> dict[str, object]:
 
 
 @router.get("")
-async def list_documents() -> list[dict[str, object]]:
+async def list_documents(user_id: int = Query(gt=0)) -> list[dict[str, object]]:
     rows = await get_pool().fetch(
         """
         SELECT d.id, d.filename, d.content_type, d.created_at,
                COUNT(c.id)::int AS chunks
         FROM documents d
         LEFT JOIN document_chunks c ON c.document_id = d.id
+        WHERE d.user_id = $1
         GROUP BY d.id
         ORDER BY d.created_at DESC
-        """
+        """,
+        user_id,
     )
     return [dict(row) for row in rows]
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_document(document_id: int) -> None:
-    result = await get_pool().execute("DELETE FROM documents WHERE id = $1", document_id)
+async def delete_document(
+    document_id: int, user_id: int = Query(gt=0)
+) -> None:
+    result = await get_pool().execute(
+        "DELETE FROM documents WHERE id = $1 AND user_id = $2", document_id, user_id
+    )
     if result == "DELETE 0":
         raise HTTPException(404, "Document not found")
 

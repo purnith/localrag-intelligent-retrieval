@@ -13,6 +13,18 @@ async def initialize_database() -> None:
         await connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
         await connection.execute(
             """
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await connection.execute(
+            "INSERT INTO users(display_name) SELECT 'Default User' WHERE NOT EXISTS (SELECT 1 FROM users)"
+        )
+        await connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS documents (
                 id BIGSERIAL PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -26,9 +38,27 @@ async def initialize_database() -> None:
             "ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash TEXT"
         )
         await connection.execute(
+            "ALTER TABLE documents ADD COLUMN IF NOT EXISTS user_id BIGINT"
+        )
+        await connection.execute(
+            "UPDATE documents SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) WHERE user_id IS NULL"
+        )
+        await connection.execute("ALTER TABLE documents ALTER COLUMN user_id SET NOT NULL")
+        await connection.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS documents_content_hash_idx
-            ON documents(content_hash)
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'documents_user_id_fkey') THEN
+                    ALTER TABLE documents ADD CONSTRAINT documents_user_id_fkey
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+                END IF;
+            END $$
+            """
+        )
+        await connection.execute("DROP INDEX IF EXISTS documents_content_hash_idx")
+        await connection.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS documents_user_content_hash_idx
+            ON documents(user_id, content_hash)
             WHERE content_hash IS NOT NULL
             """
         )
@@ -80,6 +110,52 @@ async def initialize_database() -> None:
                 error TEXT
             )
             """
+        )
+        await connection.execute(
+            "ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS user_id BIGINT"
+        )
+        await connection.execute(
+            "UPDATE ingestion_jobs SET user_id = (SELECT id FROM users ORDER BY id LIMIT 1) WHERE user_id IS NULL"
+        )
+        await connection.execute("ALTER TABLE ingestion_jobs ALTER COLUMN user_id SET NOT NULL")
+        await connection.execute(
+            """
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ingestion_jobs_user_id_fkey') THEN
+                    ALTER TABLE ingestion_jobs ADD CONSTRAINT ingestion_jobs_user_id_fkey
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+                END IF;
+            END $$
+            """
+        )
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversations (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id BIGSERIAL PRIMARY KEY,
+                conversation_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                sources JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await connection.execute(
+            "CREATE INDEX IF NOT EXISTS conversations_user_updated_idx ON conversations(user_id, updated_at DESC)"
+        )
+        await connection.execute(
+            "CREATE INDEX IF NOT EXISTS messages_conversation_created_idx ON messages(conversation_id, created_at)"
         )
 
 
