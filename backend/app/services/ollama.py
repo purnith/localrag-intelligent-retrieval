@@ -21,7 +21,10 @@ async def chat(
     async with httpx.AsyncClient(timeout=180) as client:
         response = await client.post(f"{settings.ollama_url}/api/chat", json=payload)
         response.raise_for_status()
-        return response.json()["message"]["content"]
+        content = response.json().get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Ollama returned an empty response")
+        return content.strip()
 
 
 async def create_embeddings(texts: list[str]) -> list[list[float]]:
@@ -81,6 +84,24 @@ async def generate_document_summary(
             {
                 "role": "user",
                 "content": f"Request: {question}\n\n{document_text}",
+            },
+        ]
+    )
+
+
+async def generate_document_analysis(question: str, contexts: list[str]) -> str:
+    document_text = "\n\n".join(
+        f"Passage {index + 1}: {content}" for index, content in enumerate(contexts)
+    )
+    return await chat(
+        [
+            {
+                "role": "system",
+                "content": "Analyze only the supplied document passages. Identify strengths, weaknesses, inconsistencies, and specific improvements. Support observations with the document content and do not invent missing details.",
+            },
+            {
+                "role": "user",
+                "content": f"Review request: {question}\n\n{document_text}",
             },
         ]
     )

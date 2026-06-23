@@ -12,7 +12,6 @@ from app.services.memory import (
 from app.services.ollama import create_embeddings, generate_grounded_answer
 
 router = APIRouter(prefix="/api", tags=["retrieval"])
-MIN_VECTOR_SIMILARITY = 0.5
 
 
 async def search_chunks(
@@ -44,20 +43,18 @@ async def search_chunks(
                    chunk_id, document_id, filename, content,
                    (0.8 * vector_score + 0.2 * keyword_score) AS score
             FROM scored
-            WHERE vector_score >= $5
             ORDER BY md5(content),
                      (0.8 * vector_score + 0.2 * keyword_score) DESC
         )
         SELECT chunk_id, document_id, filename, content, score
         FROM deduplicated
         ORDER BY score DESC
-        LIMIT $6
+        LIMIT $5
         """,
         str(query_embedding),
         query,
         user_id,
         document_ids or None,
-        MIN_VECTOR_SIMILARITY,
         limit,
     )
     return [SearchResult(**dict(row)) for row in rows]

@@ -147,8 +147,9 @@ export default function App() {
     if (response.ok) setConversations(await response.json());
   }
 
-  async function selectConversation(id: number | null) {
+  async function selectConversation(id: number | null, clearResult = true) {
     setConversationId(id);
+    if (clearResult) setResult(null);
     if (!id || !user) {
       setMessages([]);
       return;
@@ -269,7 +270,7 @@ export default function App() {
       setQuestion("");
       await Promise.all([
         loadConversations(),
-        selectConversation(data.conversation_id),
+        selectConversation(data.conversation_id, false),
       ]);
     } catch (askError) {
       setError(askError instanceof Error ? askError.message : "Question failed");

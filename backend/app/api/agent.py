@@ -7,6 +7,7 @@ from app.schemas import AgentResponse, QueryRequest, SearchResult
 from app.services.agent import choose_agent_action
 from app.services.memory import get_or_create_conversation, load_recent_history, save_message
 from app.services.ollama import (
+    generate_document_analysis,
     generate_document_summary,
     generate_grounded_answer,
     generate_memory_answer,
@@ -57,16 +58,19 @@ async def agent_ask(request: QueryRequest, current_user: CurrentUser) -> AgentRe
                 if history
                 else "There is no earlier conversation context yet. Please provide more detail."
             )
-        elif decision.action == "summarize_documents":
+        elif decision.action in {"summarize_documents", "analyze_documents"}:
             trace.append("document_store:loaded")
             sources = await load_summary_sources(current_user.id, request.document_ids)
-            answer = (
-                await generate_document_summary(
+            if not sources:
+                answer = "No documents are available to analyze."
+            elif decision.action == "analyze_documents":
+                answer = await generate_document_analysis(
                     decision.tool_input, [source.content for source in sources]
                 )
-                if sources
-                else "No documents are available to summarize."
-            )
+            else:
+                answer = await generate_document_summary(
+                    decision.tool_input, [source.content for source in sources]
+                )
         else:
             trace.append("hybrid_retrieval:executed")
             sources = await search_chunks(
@@ -84,6 +88,9 @@ async def agent_ask(request: QueryRequest, current_user: CurrentUser) -> AgentRe
             )
     except Exception as error:
         raise HTTPException(503, "The agent could not complete the selected tool") from error
+
+    if not isinstance(answer, str) or not answer.strip():
+        answer = "The agent could not generate an answer from the retrieved document content. Please try rephrasing the question."
 
     trace.append("response:persisted")
     await save_message(conversation_id, "assistant", answer, sources)

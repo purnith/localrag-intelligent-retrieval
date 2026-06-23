@@ -29,7 +29,7 @@ PostgreSQL/pgvector, Redis, Ollama, Docker Compose, and Kubernetes.
 - Persist conversations and source-grounded message history in PostgreSQL
 - Resolve follow-up questions using recent conversational context
 - Route requests through an LLM-driven agent planner
-- Execute document search, summarization, conversation-memory, and clarification tools
+- Execute document search, summarization, analysis, conversation-memory, and clarification tools
 - Return an observable tool trace with each agent response
 - Register and authenticate users with Argon2 password hashing
 - Protect user data with signed, HTTP-only session cookies and server-side authorization
