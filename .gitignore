@@ -30,6 +30,7 @@ data/
 .codex/
 .idea/
 .vscode/
+medical-report-analysis-system/
 
 # Operating-system and log files
 .DS_Store

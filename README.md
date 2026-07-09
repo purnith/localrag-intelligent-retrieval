@@ -1,5 +1,11 @@
 # LocalRAG — Intelligent Document Retrieval Platform
 
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688)
+![React](https://img.shields.io/badge/React-TypeScript-61dafb)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-336791)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ed)
+
 LocalRAG is a containerized retrieval-augmented generation (RAG) platform for
 multi-document knowledge retrieval. It ingests, chunks, and embeds documents,
 combines semantic vector search with PostgreSQL full-text search, and generates
@@ -7,6 +13,12 @@ answers grounded in retrieved source passages.
 
 The system uses a service-oriented architecture built with React, FastAPI,
 PostgreSQL/pgvector, Redis, Ollama, Docker Compose, and Kubernetes.
+
+Portfolio documentation:
+
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Resume bullets and keywords: [docs/RESUME.md](docs/RESUME.md)
+- Security notes: [SECURITY.md](SECURITY.md)
 
 ## Features
 
