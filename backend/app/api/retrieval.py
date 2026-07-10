@@ -3,6 +3,11 @@ from fastapi import APIRouter, HTTPException
 from app.api.auth import CurrentUser
 from app.database import get_pool
 from app.schemas import AskResponse, QueryRequest, SearchResult
+from app.services.cache import (
+    get_cached_search_results,
+    retrieval_cache_key,
+    set_cached_search_results,
+)
 from app.services.memory import (
     build_contextual_query,
     get_or_create_conversation,
@@ -17,6 +22,11 @@ router = APIRouter(prefix="/api", tags=["retrieval"])
 async def search_chunks(
     query: str, limit: int, user_id: int, document_ids: list[int] | None = None
 ) -> list[SearchResult]:
+    cache_key = retrieval_cache_key(query, limit, user_id, document_ids)
+    cached_results = await get_cached_search_results(cache_key)
+    if cached_results is not None:
+        return cached_results
+
     try:
         query_embedding = (await create_embeddings([query]))[0]
     except Exception as error:
@@ -57,7 +67,9 @@ async def search_chunks(
         document_ids or None,
         limit,
     )
-    return [SearchResult(**dict(row)) for row in rows]
+    results = [SearchResult(**dict(row)) for row in rows]
+    await set_cached_search_results(cache_key, results)
+    return results
 
 
 @router.post("/search", response_model=list[SearchResult])

@@ -29,10 +29,12 @@ Portfolio documentation:
 - Store and search vectors with PostgreSQL and pgvector
 - Retrieve passages by semantic similarity rather than exact keywords
 - Generate grounded answers with Qwen 2.5 through Ollama
+- Optionally switch generation and embedding calls to OpenAI-compatible APIs
 - Display retrieved source passages and similarity scores
 - Manage, select, and delete indexed documents
 - Prevent duplicate indexing with content hashes
 - Combine vector similarity with PostgreSQL full-text matching
+- Cache repeated retrieval results in Redis with scoped cache keys and cache-hit metrics
 - Filter weak matches and duplicate retrieved passages
 - Process document ingestion through a Redis-backed Celery worker
 - Track queued, processing, retrying, completed, and failed jobs
@@ -103,6 +105,7 @@ Question
 | Worker | Celery | Background ingestion, progress, and retry handling |
 | Agent | Ollama-powered planner and Python tools | Request routing and tool execution |
 | AI runtime | Ollama | Model serving and inference |
+| Optional hosted AI | OpenAI-compatible APIs | Cloud model serving when `LLM_PROVIDER=openai` |
 | Generation model | Qwen 2.5 3B | Grounded natural-language answers |
 | Embedding model | nomic-embed-text | 768-dimensional semantic embeddings |
 | Infrastructure | Docker Compose, Kubernetes, kind | Container orchestration, service discovery, storage, and workload management |
@@ -127,6 +130,16 @@ Download the models once:
 ```powershell
 docker compose exec ollama ollama pull qwen2.5:3b
 docker compose exec ollama ollama pull nomic-embed-text
+```
+
+Optional OpenAI-compatible provider:
+
+```powershell
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_EMBEDDING_DIMENSIONS=768
 ```
 
 Open the application:
@@ -194,6 +207,7 @@ Delete the local cluster when it is no longer needed:
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/api/health` | Report component availability |
+| `GET` | `/api/metrics/cache` | Report Redis retrieval-cache hits, misses, and hit rate |
 | `POST` | `/api/auth/register` | Register an account and create a session |
 | `POST` | `/api/auth/login` | Authenticate and create a session |
 | `GET` | `/api/auth/me` | Return the authenticated user |

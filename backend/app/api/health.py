@@ -6,6 +6,7 @@ import redis.asyncio as redis
 from fastapi import APIRouter
 
 from app.config import get_settings
+from app.services.cache import get_cache_metrics
 
 router = APIRouter(prefix="/api", tags=["health"])
 settings = get_settings()
@@ -57,3 +58,8 @@ async def health() -> dict[str, object]:
         "status": "healthy" if all(components.values()) else "degraded",
         "components": components,
     }
+
+
+@router.get("/metrics/cache")
+async def cache_metrics() -> dict[str, int | float]:
+    return await get_cache_metrics()

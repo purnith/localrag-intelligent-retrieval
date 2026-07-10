@@ -11,6 +11,7 @@ FastAPI backend
   |-- Auth/session APIs
   |-- Document ingestion APIs
   |-- Retrieval and agent APIs
+  |-- Redis retrieval cache and cache metrics
         |
         | queues ingestion jobs
         v
@@ -22,7 +23,7 @@ PostgreSQL + pgvector
         |
         | retrieved evidence
         v
-Ollama LLM runtime
+Ollama or OpenAI-compatible LLM runtime
 ```
 
 ## Core Flows
@@ -40,8 +41,9 @@ Ollama LLM runtime
 1. User asks a question.
 2. Backend resolves user, document, and conversation context.
 3. Semantic search retrieves relevant chunks.
-4. The agent planner chooses search, summary, analysis, memory, or clarification behavior.
-5. Ollama generates grounded answers with source evidence.
+4. Redis cache serves repeated scoped retrieval requests when available.
+5. The agent planner chooses search, summary, analysis, memory, or clarification behavior.
+6. Ollama or an OpenAI-compatible provider generates grounded answers with source evidence.
 
 ## Persistence
 
@@ -53,4 +55,3 @@ Ollama LLM runtime
 ## Deployment
 
 The project supports Docker Compose for local development and Kubernetes manifests for local cluster deployment with independently managed workloads.
-

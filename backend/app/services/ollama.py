@@ -10,6 +10,8 @@ EMBEDDING_BATCH_SIZE = 32
 async def chat(
     messages: list[dict[str, str]], json_format: bool = False
 ) -> str:
+    if settings.llm_provider.lower() == "openai":
+        return await openai_chat(messages, json_format)
     payload: dict[str, object] = {
         "model": settings.ollama_model,
         "messages": messages,
@@ -27,7 +29,32 @@ async def chat(
         return content.strip()
 
 
+async def openai_chat(messages: list[dict[str, str]], json_format: bool = False) -> str:
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
+    payload: dict[str, object] = {
+        "model": settings.openai_model,
+        "messages": messages,
+        "temperature": 0,
+    }
+    if json_format:
+        payload["response_format"] = {"type": "json_object"}
+    async with httpx.AsyncClient(timeout=180) as client:
+        response = await client.post(
+            f"{settings.openai_base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            json=payload,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("OpenAI-compatible provider returned an empty response")
+        return content.strip()
+
+
 async def create_embeddings(texts: list[str]) -> list[list[float]]:
+    if settings.llm_provider.lower() == "openai":
+        return await openai_embeddings(texts)
     embeddings: list[list[float]] = []
     async with httpx.AsyncClient(timeout=180) as client:
         for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
@@ -40,6 +67,26 @@ async def create_embeddings(texts: list[str]) -> list[list[float]]:
             )
             response.raise_for_status()
             embeddings.extend(response.json()["embeddings"])
+    return embeddings
+
+
+async def openai_embeddings(texts: list[str]) -> list[list[float]]:
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
+    embeddings: list[list[float]] = []
+    async with httpx.AsyncClient(timeout=180) as client:
+        for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+            response = await client.post(
+                f"{settings.openai_base_url}/embeddings",
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                json={
+                    "model": settings.openai_embedding_model,
+                    "input": texts[start : start + EMBEDDING_BATCH_SIZE],
+                    "dimensions": settings.openai_embedding_dimensions,
+                },
+            )
+            response.raise_for_status()
+            embeddings.extend(item["embedding"] for item in response.json()["data"])
     return embeddings
 
 
