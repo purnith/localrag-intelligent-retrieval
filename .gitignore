@@ -36,3 +36,4 @@ medical-report-analysis-system/
 .DS_Store
 Thumbs.db
 *.log
+benchmark-results*.json

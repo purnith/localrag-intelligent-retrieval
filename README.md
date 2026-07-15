@@ -224,6 +224,22 @@ Delete the local cluster when it is no longer needed:
 | `POST` | `/api/ask` | Retrieve evidence and generate a grounded answer |
 | `POST` | `/api/agent/ask` | Plan and execute an agent tool with persistent context |
 
+## Benchmarking
+
+Run a lightweight retrieval benchmark against a running local deployment:
+
+```powershell
+python scripts/benchmark-retrieval.py `
+  --email user@example.com `
+  --password your-password `
+  --endpoint /api/search `
+  --repeat 5
+```
+
+The script records success rate, requests per second, and latency statistics
+including mean, median, p95, and max latency. Results are written to
+`benchmark-results.json`, which is ignored by Git.
+
 ## Example
 
 Upload `test-data/sample-policy.txt`, then ask:
@@ -254,7 +270,7 @@ deployment. The architecture is structured for incremental extraction of
 workers, retrieval services, and agent workflows as operational requirements
 grow.
 
-- Redis is connected and monitored but caching is not implemented yet.
+- Redis caching is implemented for repeated scoped retrieval requests; benchmark results depend on local hardware, data size, and model runtime.
 - Login rate limiting, password recovery, and email verification are not currently implemented.
 - Scanned PDFs require OCR, which is not currently included.
 - Vector search currently uses exact cosine distance without an approximate index.
@@ -262,7 +278,6 @@ grow.
 
 ## Roadmap
 
-- Redis query caching
 - Configurable retrieval thresholds and local reranking
 - Reranking and retrieval-quality evaluation
 - Authentication and document-level authorization
